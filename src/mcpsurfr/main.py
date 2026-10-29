@@ -1,11 +1,12 @@
 import asyncio, base64, logging, os, re
-from collections import OrderedDict
 from pathlib import Path
 from typing import List, Dict, Literal
 
 from fastmcp import FastMCP, Context
 from fastmcp.server.providers.skills import SkillsDirectoryProvider
 from mcp.types import ElicitRequest, ElicitRequestFormParams, Icon, InputRequiredResult, ToolAnnotations
+
+from mcpsurfr.utils.cache import TTLCache
 
 _HERE = Path(__file__).parent
 
@@ -148,6 +149,10 @@ async def _check_backend(ctx: Context, notes: List[str], backend: str, opts: Dic
     await _warn(ctx, notes, f"Unknown {kind}backend {backend!r}, used auto. Available: {', '.join(valid)}")
     return "auto"
 
+# raw engine results, keyed by everything that changes them. Only hits are kept, so a
+# block or an empty answer is retried next time instead of being remembered.
+_searches = TTLCache(maxsize=64)
+
 async def _search(ctx: Context, notes: List[str], query: str, backend: str, max_results: int,
                   opts: Dict | None = None) -> List[Dict]:
     from ddgs import DDGS
@@ -159,14 +164,24 @@ async def _search(ctx: Context, notes: List[str], query: str, backend: str, max_
     engines = DATED_AUTO if backend == "auto" and "timelimit" in opts and not news else backend
     # off-domain results get dropped below, so ask for more up front
     wanted = max_results * 3 if include or exclude else max_results
-    try:
-        find = DDGS().news if news else DDGS().text
-        results = await asyncio.to_thread(find, site_query(query, include), max_results=wanted, backend=engines, **kwargs)
-    except Exception as e:
-        # ddgs raises when an engine returns nothing, which is usually a block
-        log.warning("Error searching %s for %r: %s", backend, query, e)
-        await _warn(ctx, notes, f"{backend} returned no results for {query!r} ({e})")
-        return []
+    q = site_query(query, include)
+    key = (q, wanted, engines, tuple(sorted(kwargs.items())))
+    # news moves by the minute, so it always searches fresh
+    cached = None if news else _searches.get(key)
+    if cached is not None:
+        # later steps write scores into the dicts, so hand out copies
+        results = [dict(r) for r in cached]
+    else:
+        try:
+            find = DDGS().news if news else DDGS().text
+            results = await asyncio.to_thread(find, q, max_results=wanted, backend=engines, **kwargs)
+        except Exception as e:
+            # ddgs raises when an engine returns nothing, which is usually a block
+            log.warning("Error searching %s for %r: %s", backend, query, e)
+            await _warn(ctx, notes, f"{backend} returned no results for {query!r} ({e})")
+            return []
+        if results and not news:
+            _searches.set(key, [dict(r) for r in results])
     for r in results:
         # news results call the link "url"
         r.setdefault("href", r.get("url"))
@@ -283,7 +298,7 @@ async def rag_search_google(ctx: Context, query: str, num_results:int=10, top_k:
 
 # last few search() results, so answering the "full pages?" question doesn't search
 # and fetch again (on the 2026-07-28 protocol the tool re-runs with the answer)
-_recent: "OrderedDict[tuple, Dict]" = OrderedDict()
+_recent = TTLCache(maxsize=8)
 
 def _can_ask(ctx: Context) -> bool:
     caps = getattr(ctx.session, "client_capabilities", None)
@@ -361,10 +376,9 @@ async def search(
            recency, region, tuple(include_domains or []), tuple(exclude_domains or []), news)
     found = _recent.get(key) or await _find_passages(ctx, query, keywords, num_results, top_pages, max_passages,
                                                      backend, _filters(recency, region, include_domains, exclude_domains, news))
-    _recent[key] = found
-    _recent.move_to_end(key)
-    while len(_recent) > 8:
-        _recent.popitem(last=False)
+    # only remember answers worth repeating: a blocked or empty search should run again
+    if found["pages"]:
+        _recent.set(key, found)
 
     result = _extras({k: found[k] for k in ("query", "passages", "tier", "pages_fetched", "passages_considered")},
                      found["warnings"], found["skipped"])

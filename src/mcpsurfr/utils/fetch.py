@@ -16,6 +16,7 @@ import primp
 
 from importlib.resources import as_file
 
+from .cache import TTLCache
 from .extract import extract_blocks, extract_main_text
 from .pdf import pdf_blocks
 
@@ -100,8 +101,22 @@ def _readable(text: str) -> bool:
     prose = sum(len(line) for line in text.split("\n") if len(line.split()) >= 8)
     return prose >= 500 or prose >= 0.2 * len(text)
 
-def fetch_page(url: str, timeout: int = 5) -> Dict:
-    """A page's main text: {"url", "text"}, or {"url", "reason"} when it's unusable."""
+# the full-page and passage tools both read from here, so a page fetched by one
+# call is free for the next for a few minutes
+_docs = TTLCache(maxsize=64)
+_UNREADABLE = "no readable content (nav only or rendered by JavaScript)"
+
+def fetch_doc(url: str, timeout: int = 5) -> Dict:
+    """A page as {"url", "blocks", "text"}, or {"url", "reason"} when it's unusable.
+    "blocks" are (heading, text) pairs for passage search, "text" the main content."""
+    doc = _docs.get(url)
+    if doc is None:
+        doc = _fetch_doc(url, timeout)
+        if "text" in doc:
+            _docs.set(url, doc)
+    return doc
+
+def _fetch_doc(url: str, timeout: int) -> Dict:
     response, reason = _get(url, timeout)
     if response is None:
         return {"url": url, "reason": reason}
@@ -109,28 +124,32 @@ def fetch_page(url: str, timeout: int = 5) -> Dict:
         blocks, reason = pdf_blocks(response.content)
         if not blocks:
             return {"url": url, "reason": reason}
-        return {"url": url, "text": "\n".join(f"[{page}] {text}" for page, text in blocks)}
+        return {"url": url, "blocks": blocks, "text": "\n".join(f"[{page}] {text}" for page, text in blocks)}
     # primp decodes the charset (header or <meta>); extraction drops nav menus,
     # banners and footers. primp's own html->text is the fallback.
-    text = (extract_main_text(response.text) if _is_html(response) else None) or _plain(response)
-    if not _readable(text):
-        return {"url": url, "reason": "no readable content (nav only or rendered by JavaScript)"}
-    return {"url": url, "text": text}
+    html = _is_html(response)
+    text = (extract_main_text(response.text) if html else None) or _plain(response)
+    blocks = extract_blocks(response.text) if html else []
+    text_ok = _readable(text)
+    blocks_ok = bool(blocks) and _readable("\n".join(t for _, t in blocks))
+    if not text_ok and not blocks_ok:
+        return {"url": url, "reason": _UNREADABLE}
+    # each view stands in for the other when only one came out usable
+    if not blocks_ok:
+        blocks = [("", line) for line in text.split("\n") if line.strip()]
+    if not text_ok:
+        text = "\n".join(t for _, t in blocks)
+    return {"url": url, "blocks": blocks, "text": text}
+
+def fetch_page(url: str, timeout: int = 5) -> Dict:
+    """A page's main text: {"url", "text"}, or {"url", "reason"} when it's unusable."""
+    doc = fetch_doc(url, timeout)
+    return {k: v for k, v in doc.items() if k != "blocks"}
 
 def fetch_blocks(url: str, timeout: int = 5) -> Tuple[List[Tuple[str, str]], Optional[str]]:
     """A page as (heading, text) blocks for passage search, plus why it failed if it did."""
-    response, reason = _get(url, timeout)
-    if response is None:
-        return [], reason
-    if _is_pdf(response):
-        return pdf_blocks(response.content)
-    blocks = extract_blocks(response.text) if _is_html(response) else []
-    if not blocks:
-        text = _plain(response)
-        blocks = [("", text)] if text else []
-    if not _readable("\n".join(t for _, t in blocks)):
-        return [], "no readable content (nav only or rendered by JavaScript)"
-    return blocks, None
+    doc = fetch_doc(url, timeout)
+    return doc.get("blocks", []), doc.get("reason")
 
 # lives as long as the server so its threads, and their clients, carry over between calls
 _pool = ThreadPoolExecutor(max_workers=5, thread_name_prefix="fetch")
