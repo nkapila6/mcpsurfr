@@ -35,7 +35,9 @@ Local web search with on-device re-ranking, no API keys.
 - deep_research: broader topics. Give it 2-5 specific, related search_terms. Pass passages=true to
   get only the relevant passages per term instead of full pages.
 - Every search tool takes recency ("day", "week", "month", "year"), region ("uk-en"),
-  include_domains / exclude_domains, and news=true for news articles with dates.
+  include_domains / exclude_domains (paths work: "kubernetes.io/docs"; domain_mode="prefer" ranks
+  them first instead of filtering), news=true for dated news articles, and fresh=true to skip the
+  cache. search and rag_search_ddgs also take exact_match=true for "quoted phrases".
 - Google often blocks scrapers. When it returns nothing, the server retries with "auto" and says so.
 - Results list pages that couldn't be used in `skipped`, with the search snippet for each in
   `snippets`, and engine problems in `warnings`.
@@ -148,11 +150,16 @@ def _snippets(skipped: List[Dict], results: List[Dict]) -> List[Dict]:
     return out
 
 def _filters(recency: str | None = None, region: str | None = None, include_domains: List[str] | None = None,
-             exclude_domains: List[str] | None = None, news: bool = False) -> Dict:
+             exclude_domains: List[str] | None = None, news: bool = False, fresh: bool = False,
+             domain_mode: str = "only", exact_match: bool = False) -> Dict:
     """The search filters every tool takes, cleaned up. "problems" holds the ones that were dropped."""
     from mcpsurfr.utils.tools import clean_domains
-    opts = {"include": clean_domains(include_domains), "exclude": clean_domains(exclude_domains), "problems": [],
-            "news": news}
+    include = clean_domains(include_domains)
+    opts = {"include": include, "exclude": clean_domains(exclude_domains), "problems": [],
+            "news": news, "fresh": fresh, "exact_match": exact_match, "prefer": []}
+    # "prefer" ranks those sites first instead of filtering everything else out
+    if domain_mode == "prefer":
+        opts["prefer"], opts["include"] = include, []
     if recency:
         opts["timelimit"] = _RECENCY[recency]
     region = (region or "").strip().lower()
@@ -198,7 +205,7 @@ async def _search(ctx: Context, notes: List[str], query: str, backend: str, max_
     q = site_query(query, include)
     key = (q, wanted, engines, tuple(sorted(kwargs.items())))
     # news moves by the minute, so it always searches fresh
-    cached = None if news else _searches.get(key)
+    cached = None if news or opts.get("fresh") else _searches.get(key)
     if cached is not None:
         # later steps write scores into the dicts, so hand out copies
         results = [dict(r) for r in cached]
@@ -224,11 +231,17 @@ async def _search(ctx: Context, notes: List[str], query: str, backend: str, max_
         await _warn(ctx, notes, f"{backend} found results for {query!r}, but none on the allowed domains")
     return kept[:max_results]
 
-async def _fetch(ctx: Context, results: List[Dict], include_urls: bool):
+async def _fetch(ctx: Context, results: List[Dict], include_urls: bool, opts: Dict | None = None,
+                 phrases: List[str] | None = None):
     """Fetch pages best first within MAX_CHARS. Returns (content, skipped)."""
-    from mcpsurfr.utils.fetch import fetch_all_content
+    from mcpsurfr.utils.fetch import cached_text, fetch_all_content, forget
     urls = [r["href"] for r in results if r.get("href")]
+    if (opts or {}).get("fresh"):
+        forget(urls)
     content, skipped = await asyncio.to_thread(fetch_all_content, urls, MAX_CHARS)
+    if phrases:
+        # check the whole page, not just the slice that fit the budget
+        content = _keep_phrases(content, phrases, skipped, lambda p: cached_text(p["url"]) or p["text"])
     if skipped:
         await ctx.info(f"{len(skipped)} of {len(urls)} pages skipped (blocked, not a web page, empty or duplicate)")
     _add_meta(content, results)
@@ -236,6 +249,29 @@ async def _fetch(ctx: Context, results: List[Dict], include_urls: bool):
         for page in content:
             page.pop("url")
     return content, skipped
+
+def _phrases(query: str, opts: Dict) -> List[str]:
+    """The query's "quoted phrases", when exact_match asked for them."""
+    return [p.lower() for p in re.findall(r'"([^"]+)"', query) if p.strip()] if opts.get("exact_match") else []
+
+def _keep_phrases(items: List, phrases: List[str], skipped: List[Dict], text_of) -> List:
+    kept = []
+    for item in items:
+        text = text_of(item).lower()
+        missing = [p for p in phrases if p not in text]
+        if missing:
+            url = item["url"] if isinstance(item, dict) else item
+            skipped.append({"url": url, "reason": f'doesn\'t contain "{missing[0]}"'})
+        else:
+            kept.append(item)
+    return kept
+
+def _prefer_first(results: List[Dict], opts: Dict) -> List[Dict]:
+    """Preferred domains first, keeping each group's order."""
+    from mcpsurfr.utils.tools import preferred
+    if not opts.get("prefer"):
+        return results
+    return sorted(results, key=lambda r: not preferred(r.get("href", ""), opts["prefer"]))
 
 def _add_meta(items: List[Dict], results: List[Dict], meta: Dict[str, Dict] | None = None) -> None:
     """Give each page or passage its title and publish date. A news result's date beats the
@@ -269,11 +305,11 @@ async def _rag_search(ctx: Context, query: str, backend: str, num_results: int, 
         return _extras(dict(result, content=[]), notes, [])
 
     await ctx.report_progress(1, 3, f"Ranking {len(results)} results")
-    scored_results = sort_by_score(await asyncio.to_thread(add_score_to_dict, query, results))
+    scored_results = _prefer_first(sort_by_score(await asyncio.to_thread(add_score_to_dict, query, results)), opts)
     top_results = scored_results[0:top_k]
 
     await ctx.report_progress(2, 3, f"Fetching {len(top_results)} pages")
-    content, skipped = await _fetch(ctx, top_results, include_urls)
+    content, skipped = await _fetch(ctx, top_results, include_urls, opts, _phrases(query, opts))
     await ctx.report_progress(3, 3, "Done")
     return _extras(result, notes, skipped, top_results) | {"content": content}
 
@@ -281,7 +317,8 @@ async def _rag_search(ctx: Context, query: str, backend: str, num_results: int, 
 async def rag_search_ddgs(ctx: Context, query: str, num_results:int=10, top_k:int=5, include_urls:bool=True,
                           backend: str = "auto", recency: Recency | None = None, region: str | None = None,
                           include_domains: List[str] | None = None, exclude_domains: List[str] | None = None,
-                          news: bool = False) -> Dict:
+                          news: bool = False, fresh: bool = False, domain_mode: Literal["only", "prefer"] = "only",
+                          exact_match: bool = False) -> Dict:
     """
     Search the web and return the most relevant pages as text, for when whole pages are
     wanted (search returns only the relevant passages). Results are re-ranked locally by
@@ -302,11 +339,15 @@ async def rag_search_ddgs(ctx: Context, query: str, num_results:int=10, top_k:in
                        backends that return nothing are retried with "auto".
         recency (str | None): Only results from the past "day", "week", "month" or "year".
         region (str | None): Region-language code like "us-en", "uk-en" or "de-de". Default: ddgs's own (us-en).
-        include_domains (List[str] | None): Only results from these sites, subdomains included.
-            Example: ["python.org", "stackoverflow.com"]
+        include_domains (List[str] | None): Only results from these sites, subdomains included. A path
+            narrows it to part of a site. Example: ["python.org", "stackoverflow.com", "kubernetes.io/docs"]
         exclude_domains (List[str] | None): Never results from these sites. Example: ["pinterest.com"]
         news (bool): Search news articles instead of the web. Results then carry their published
             "date". News backends: auto, bing, duckduckgo, yahoo. Pair with recency for current events.
+        fresh (bool): Skip the 5-minute cache and search and fetch again, for pages that just changed.
+        domain_mode (str): "only" (default) keeps include_domains as a filter; "prefer" ranks those
+            sites first and keeps results from elsewhere too.
+        exact_match (bool): Only keep pages that contain every "quoted phrase" in the query.
 
     Returns:
         Dict: {"backend", "content": [{"type": "text", "text", "url", "title", "date"}, ...]} ordered by
@@ -316,7 +357,7 @@ async def rag_search_ddgs(ctx: Context, query: str, num_results:int=10, top_k:in
               have "truncated": true and their full "chars". Also "skipped": [{"url", "reason"}]
               for pages left out, and "warnings" when an engine failed.
     """
-    opts = _filters(recency, region, include_domains, exclude_domains, news)
+    opts = _filters(recency, region, include_domains, exclude_domains, news, fresh, domain_mode, exact_match)
     return await _rag_search(ctx, query, backend, num_results, top_k, include_urls, opts)
 
 @_legacy_tool(title="Google search", annotations=_READ_ONLY, icons=[_ICON])
@@ -374,6 +415,9 @@ async def search(
     include_domains: List[str] | None = None,
     exclude_domains: List[str] | None = None,
     news: bool = False,
+    fresh: bool = False,
+    domain_mode: Literal["only", "prefer"] = "only",
+    exact_match: bool = False,
 ) -> Dict | InputRequiredResult:
     """
     Search the web and return only the passages that answer the query, not whole
@@ -399,11 +443,15 @@ async def search(
         backend (str): Search backend, same names as deep_research. Default "auto".
         recency (str | None): Only results from the past "day", "week", "month" or "year".
         region (str | None): Region-language code like "us-en", "uk-en" or "de-de". Default: ddgs's own (us-en).
-        include_domains (List[str] | None): Only results from these sites, subdomains included.
-            Example: ["python.org", "stackoverflow.com"]
+        include_domains (List[str] | None): Only results from these sites, subdomains included. A path
+            narrows it to part of a site. Example: ["python.org", "stackoverflow.com", "kubernetes.io/docs"]
         exclude_domains (List[str] | None): Never results from these sites. Example: ["pinterest.com"]
         news (bool): Search news articles instead of the web. Results then carry their published
             "date". News backends: auto, bing, duckduckgo, yahoo. Pair with recency for current events.
+        fresh (bool): Skip the 5-minute cache and search and fetch again, for pages that just changed.
+        domain_mode (str): "only" (default) keeps include_domains as a filter; "prefer" ranks those
+            sites first and keeps results from elsewhere too.
+        exact_match (bool): Only keep pages that contain every "quoted phrase" in the query.
 
     Returns:
         Dict with "passages": [{"url", "title", "date", "heading", "text", "matched"}, ...] best first
@@ -417,9 +465,10 @@ async def search(
     """
     keywords = keywords or []
     key = (query, tuple(keywords), num_results, top_pages, max_passages, backend,
-           recency, region, tuple(include_domains or []), tuple(exclude_domains or []), news)
-    found = _recent.get(key) or await _find_passages(ctx, query, keywords, num_results, top_pages, max_passages,
-                                                     backend, _filters(recency, region, include_domains, exclude_domains, news))
+           recency, region, tuple(include_domains or []), tuple(exclude_domains or []), news, domain_mode, exact_match)
+    found = (None if fresh else _recent.get(key)) or await _find_passages(ctx, query, keywords, num_results, top_pages, max_passages,
+                                                     backend, _filters(recency, region, include_domains, exclude_domains,
+                                                                       news, fresh, domain_mode, exact_match))
     # only remember answers worth repeating: a blocked or empty search should run again
     if found["pages"]:
         _recent.set(key, found)
@@ -488,11 +537,20 @@ async def _find_passages(ctx: Context, query: str, keywords: List[str], num_resu
     results = await asyncio.to_thread(add_score_to_dict, query, results)
     snippets = [{"heading": r.get("title", ""), "text": r.get("body", "")} for r in results]
     hits = keyword_scores(query, keywords, snippets)
-    ranked = sorted(zip(results, hits), key=lambda x: (x[1] > 0, x[1] + x[0]["score"]), reverse=True)
+    from mcpsurfr.utils.tools import preferred
+    ranked = sorted(zip(results, hits), key=lambda x: (preferred(x[0]["href"], opts.get("prefer", [])),
+                                                      x[1] > 0, x[1] + x[0]["score"]), reverse=True)
     urls = [r["href"] for r, _ in ranked[:top_pages]]
 
     await ctx.report_progress(2, 4, f"Fetching {len(urls)} pages")
+    if opts.get("fresh"):
+        from mcpsurfr.utils.fetch import forget
+        forget(urls)
     pages, skipped, meta = await asyncio.to_thread(fetch_all_blocks, urls)
+    phrases = _phrases(query, opts)
+    if phrases:
+        keep = _keep_phrases(list(pages), phrases, skipped, lambda u: "\n".join(t for _, t in pages[u]))
+        pages = {u: pages[u] for u in keep}
     if skipped:
         await ctx.info(f"{len(skipped)} of {len(urls)} pages skipped (blocked, not a web page, empty or duplicate)")
     await ctx.report_progress(3, 4, "Scoring passages")
@@ -612,7 +670,7 @@ async def _deep_research_internal(ctx: Context, search_terms:List[str], backends
         nonlocal done
         async with sem:
             results = await _search(ctx, notes, term, backend, num_results_per_term, opts)
-        top = sort_by_score(await asyncio.to_thread(add_score_to_dict, term, results))[:top_k_per_term] if results else []
+        top = _prefer_first(sort_by_score(await asyncio.to_thread(add_score_to_dict, term, results)), opts)[:top_k_per_term] if results else []
         search_summary[term][backend] = len(top)
         done += 1
         await ctx.report_progress(min(done, step), total, f"Searched {backend} for {term!r}")
@@ -655,6 +713,9 @@ async def _deep_research_internal(ctx: Context, search_terms:List[str], backends
     if DEEP_PASSAGES if passages is None else passages:
         from mcpsurfr.utils.fetch import fetch_all_blocks
         urls = [r["href"] for r in unique_results]
+        if opts.get("fresh"):
+            from mcpsurfr.utils.fetch import forget
+            forget(urls)
         pages, skipped, meta = await asyncio.to_thread(fetch_all_blocks, urls)
         picked, tiers = await _passages_per_term(search_terms, urls, pages, max_passages)
         _add_meta(picked, unique_results, meta)
@@ -662,7 +723,7 @@ async def _deep_research_internal(ctx: Context, search_terms:List[str], backends
         result.update(pages_fetched=len(pages), tiers=tiers)
         return _extras(result, notes, skipped, unique_results) | {"passages": picked}
 
-    content, skipped = await _fetch(ctx, unique_results, include_urls)
+    content, skipped = await _fetch(ctx, unique_results, include_urls, opts)
     await ctx.report_progress(total, total, "Done")
     return _extras(result, notes, skipped, unique_results) | {"content": content}
 
@@ -709,6 +770,8 @@ async def deep_research(
     include_domains: List[str] | None = None,
     exclude_domains: List[str] | None = None,
     news: bool = False,
+    fresh: bool = False,
+    domain_mode: Literal["only", "prefer"] = "only",
     passages: bool | None = None,
     max_passages: int = 12,
 ) -> Dict:
@@ -733,11 +796,14 @@ async def deep_research(
         include_urls (bool): Whether to include each page's source URL.
         recency (str | None): Applied to every term. Only results from the past "day", "week", "month" or "year".
         region (str | None): Region-language code like "us-en", "uk-en" or "de-de". Default: ddgs's own (us-en).
-        include_domains (List[str] | None): Only results from these sites, subdomains included.
-            Example: ["python.org", "stackoverflow.com"]
+        include_domains (List[str] | None): Only results from these sites, subdomains included. A path
+            narrows it to part of a site. Example: ["python.org", "stackoverflow.com", "kubernetes.io/docs"]
         exclude_domains (List[str] | None): Never results from these sites. Example: ["pinterest.com"]
         news (bool): Search news articles instead of the web. Results then carry their published
             "date". News backends: auto, bing, duckduckgo, yahoo. Pair with recency for current events.
+        fresh (bool): Skip the 5-minute cache and search and fetch again, for pages that just changed.
+        domain_mode (str): "only" (default) keeps include_domains as a filter; "prefer" ranks those
+            sites first and keeps results from elsewhere too.
         passages (bool | None): True returns only the passages that answer each term, about a
             tenth of the text of full pages: prefer it unless whole pages are needed. False returns
             full pages. Left out, the server's MCPSURFR_DEEP_RESEARCH_MODE decides (pages by default).
@@ -765,7 +831,7 @@ async def deep_research(
         num_results_per_term=num_results_per_term,
         top_k_per_term=top_k_per_term,
         include_urls=include_urls,
-        opts=_filters(recency, region, include_domains, exclude_domains, news),
+        opts=_filters(recency, region, include_domains, exclude_domains, news, fresh, domain_mode),
         passages=passages,
         max_passages=max_passages,
     )

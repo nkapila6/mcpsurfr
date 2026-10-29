@@ -16,19 +16,34 @@ def sort_by_score(results: List[Dict]) -> List[Dict]:
 # --- domain filters ------------------------------------------------------------
 
 def clean_domains(domains: List[str] | None) -> List[str]:
-    """"https://www.Example.com/docs" -> "example.com", so the model can pass URLs or hosts."""
+    """"https://www.Example.com/Docs/" -> "example.com/docs", so the model can pass URLs,
+    hosts, or a host plus a path to narrow it to one part of a site."""
     out = []
     for d in domains or []:
-        d = d.strip().lower()
-        host = (urlparse(d if "//" in d else f"//{d}").hostname or "").removeprefix("www.")
-        if host and host not in out:
-            out.append(host)
+        d = d.strip()
+        parsed = urlparse(d if "//" in d else f"//{d}")
+        host = (parsed.hostname or "").lower().removeprefix("www.")
+        path = parsed.path.strip("/").lower()
+        entry = f"{host}/{path}" if host and path else host
+        if entry and entry not in out:
+            out.append(entry)
     return out
 
 def _host_in(url: str, domains: List[str]) -> bool:
-    host = (urlparse(url).hostname or "").lower()
-    # subdomains count: docs.python.org is under python.org
-    return any(host == d or host.endswith(f".{d}") for d in domains)
+    parsed = urlparse(url)
+    host, path = (parsed.hostname or "").lower(), parsed.path.lower().rstrip("/")
+    for d in domains:
+        d_host, _, d_path = d.partition("/")
+        # subdomains count: docs.python.org is under python.org
+        if host != d_host and not host.endswith(f".{d_host}"):
+            continue
+        # a path narrows it to that part of the site: /docs, /docs/x, not /docsearch
+        if not d_path or path == f"/{d_path}" or path.startswith(f"/{d_path}/"):
+            return True
+    return False
+
+def preferred(url: str, prefer: List[str]) -> bool:
+    return bool(prefer) and _host_in(url, prefer)
 
 def domain_ok(url: str, include: List[str], exclude: List[str]) -> bool:
     return (not include or _host_in(url, include)) and not _host_in(url, exclude)

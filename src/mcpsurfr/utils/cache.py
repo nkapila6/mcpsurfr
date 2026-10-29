@@ -46,6 +46,10 @@ class TTLCache:
             self._data.move_to_end(key)
             return value
 
+    def pop(self, key: Hashable) -> None:
+        with self._lock:
+            self._data.pop(key, None)
+
     def set(self, key: Hashable, value: Any) -> None:
         if self.ttl <= 0:
             return

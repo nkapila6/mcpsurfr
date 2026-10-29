@@ -258,3 +258,17 @@ def clip(text: str, limit: int) -> str:
         if pos > 0:
             return cut[:pos + len(sep.strip())].rstrip()
     return cut
+
+
+# --- fresh reads and exact phrases ----------------------------------------------
+
+def forget(urls: List[str]) -> None:
+    """Drop pages from the cache so the next fetch reads them live (the tools' fresh=true)."""
+    for url in urls:
+        _docs.pop(url)
+
+def cached_text(url: str) -> Optional[str]:
+    """A fetched page's full text, if it's still cached: phrase checks need the whole page,
+    not the slice that fit the budget."""
+    doc = _docs.get(url)
+    return doc.get("text") if doc else None
