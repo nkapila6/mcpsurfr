@@ -95,6 +95,78 @@ def extract_main_text(page: str) -> Optional[str]:
     return None if root is None else (_render(root) or None)
 
 
+# meta names sites use for the publish date, most specific first
+_DATE_KEYS = ("article:published_time", "og:published_time", "datepublished", "publishdate", "pubdate",
+              "dc.date.issued", "dc.date", "date", "parsely-pub-date", "sailthru.date")
+_ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def page_meta(page: str) -> dict:
+    """Title and publish date (YYYY-MM-DD) from a page's metadata, where it has them."""
+    try:
+        doc = lxml_html.fromstring(page)
+    except (ParserError, ValueError):
+        return {}
+    meta = {}
+    title = doc.xpath('string(//meta[@property="og:title"]/@content)') or doc.xpath("string(//title)")
+    if title.strip():
+        meta["title"] = " ".join(title.split())[:200]
+
+    found = {}
+    for m in doc.xpath("//meta[@content]"):
+        key = (m.get("property") or m.get("name") or m.get("itemprop") or "").lower()
+        if key in _DATE_KEYS and key not in found:
+            found[key] = m.get("content", "")
+    dates = [found[k] for k in _DATE_KEYS if k in found]
+    dates += _json_ld_dates(doc)
+    # a <time> inside the article, not the one on a comment or the "updated" line in a sidebar
+    dates += doc.xpath("//article//time[@datetime]/@datetime | //main//time[@datetime]/@datetime")[:1]
+    for d in dates:
+        iso = _ISO_DATE.match(d.strip())
+        if iso:
+            meta["date"] = iso.group(0)
+            break
+    return meta
+
+
+_URL_DATE = re.compile(r"/(20\d\d|19\d\d)[/-](\d{1,2}|[A-Za-z]{3})[/-](\d{1,2})(?:/|$)")
+_MONTHS = {m: i for i, m in enumerate("jan feb mar apr may jun jul aug sep oct nov dec".split(), 1)}
+
+
+def url_date(url: str) -> str:
+    """Blogs that keep the date only in the path: /2024/Dec/31/ or /2024/12/31/."""
+    m = _URL_DATE.search(url)
+    if not m:
+        return ""
+    year, month, day = m.groups()
+    month = int(month) if month.isdigit() else _MONTHS.get(month.lower(), 0)
+    if not (1 <= month <= 12 and 1 <= int(day) <= 31):
+        return ""
+    return f"{year}-{month:02d}-{int(day):02d}"
+
+
+def _json_ld_dates(doc) -> list:
+    import json
+    out = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if isinstance(node.get("datePublished"), str):
+                out.append(node["datePublished"])
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    for script in doc.xpath('//script[@type="application/ld+json"]/text()'):
+        try:
+            walk(json.loads(script))
+        except ValueError:
+            continue
+    return out
+
+
 def fragment_text(fragment: str) -> str:
     """Text of an HTML snippet, like a post body from an API, laid out the same way
     as a page: code blocks keep their lines."""

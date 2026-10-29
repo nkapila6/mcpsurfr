@@ -18,7 +18,7 @@ from importlib.resources import as_file
 
 from .adapters import site_doc
 from .cache import TTLCache
-from .extract import extract_blocks, extract_main_text
+from .extract import extract_blocks, extract_main_text, page_meta, url_date
 from .pdf import pdf_blocks
 
 # stdout is the MCP protocol channel in stdio mode, so never print(); log to stderr
@@ -143,7 +143,10 @@ def _fetch_doc(url: str, timeout: int) -> Dict:
         blocks = [("", line) for line in text.split("\n") if line.strip()]
     if not text_ok:
         text = "\n".join(t for _, t in blocks)
-    return {"url": url, "blocks": blocks, "text": text}
+    doc = {"url": url, "blocks": blocks, "text": text} | (page_meta(response.text) if html else {})
+    if "date" not in doc and url_date(url):
+        doc["date"] = url_date(url)
+    return doc
 
 def fetch_page(url: str, timeout: int = 5) -> Dict:
     """A page's main text: {"url", "text"}, or {"url", "reason"} when it's unusable."""
@@ -168,16 +171,18 @@ def _parallel(fn, urls: List[str], failed) -> List:
             return failed(url, f"error: {type(e).__name__}")
     return list(_pool.map(safe, urls))
 
-def fetch_all_blocks(urls: List[str]) -> Tuple[Dict[str, List[Tuple[str, str]]], List[Dict]]:
-    """Fetch pages as blocks in parallel. Returns {url: blocks} plus the skipped pages."""
-    pages, skipped = {}, []
-    for url, (blocks, reason) in zip(urls, _parallel(fetch_blocks, urls, lambda u, r: ([], r))):
-        if blocks:
-            pages[url] = blocks
+def fetch_all_blocks(urls: List[str]) -> Tuple[Dict[str, List[Tuple[str, str]]], List[Dict], Dict[str, Dict]]:
+    """Fetch pages as blocks in parallel. Returns {url: blocks}, the skipped pages, and
+    {url: {"title", "date"}} for the pages that have them."""
+    pages, skipped, meta = {}, [], {}
+    for url, doc in zip(urls, _parallel(fetch_doc, urls, lambda u, r: {"url": u, "reason": r})):
+        if doc.get("blocks"):
+            pages[url] = doc["blocks"]
+            meta[url] = {k: doc[k] for k in ("title", "date") if doc.get(k)}
         else:
-            skipped.append({"url": url, "reason": reason})
+            skipped.append({"url": url, "reason": doc.get("reason")})
     texts = drop_near_duplicates([{"url": u, "text": "\n".join(t for _, t in b)} for u, b in pages.items()], skipped)
-    return {p["url"]: pages[p["url"]] for p in texts}, skipped
+    return {p["url"]: pages[p["url"]] for p in texts}, skipped, meta
 
 def fetch_all_content(urls: List[str], budget: int) -> Tuple[List[Dict], List[Dict]]:
     """Fetch pages in parallel, best first. Returns the pages that fit the shared
@@ -223,6 +228,7 @@ def fit_budget(pages: List[Dict], budget: int) -> List[Dict]:
     for i, page in enumerate(pages):
         text = page["text"]
         entry = {"type": "text", "text": clip(text, alloc[i]), "url": page["url"]}
+        entry.update({k: page[k] for k in ("title", "date") if page.get(k)})
         if len(entry["text"]) < len(text):
             entry.update(truncated=True, chars=len(text))
         out.append(entry)

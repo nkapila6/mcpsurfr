@@ -197,18 +197,25 @@ async def _fetch(ctx: Context, results: List[Dict], include_urls: bool):
     content, skipped = await asyncio.to_thread(fetch_all_content, urls, MAX_CHARS)
     if skipped:
         await ctx.info(f"{len(skipped)} of {len(urls)} pages skipped (blocked, not a web page, empty or duplicate)")
-    _add_dates(content, results)
+    _add_meta(content, results)
     if not include_urls:
         for page in content:
             page.pop("url")
     return content, skipped
 
-def _add_dates(items: List[Dict], results: List[Dict]) -> None:
-    """Carry the published date news results come with onto the pages or passages from them."""
-    dates = {r["href"]: r["date"] for r in results if r.get("href") and r.get("date")}
+def _add_meta(items: List[Dict], results: List[Dict], meta: Dict[str, Dict] | None = None) -> None:
+    """Give each page or passage its title and publish date. A news result's date beats the
+    page's own metadata; the search result's title fills in when the page has none."""
+    by_url = {r["href"]: r for r in results if r.get("href")}
     for item in items:
-        if item.get("url") in dates:
-            item["date"] = dates[item["url"]]
+        url = item.get("url")
+        found, page = by_url.get(url, {}), (meta or {}).get(url, {})
+        title = item.get("title") or page.get("title") or found.get("title")
+        date = found.get("date") or item.get("date") or page.get("date")
+        if title:
+            item["title"] = title
+        if date:
+            item["date"] = date
 
 async def _rag_search(ctx: Context, query: str, backend: str, num_results: int, top_k: int, include_urls: bool,
                       opts: Dict | None = None) -> Dict:
@@ -268,7 +275,8 @@ async def rag_search_ddgs(ctx: Context, query: str, num_results:int=10, top_k:in
             "date". News backends: auto, bing, duckduckgo, yahoo. Pair with recency for current events.
 
     Returns:
-        Dict: {"backend", "content": [{"type": "text", "text", "url"}, ...]} ordered by relevance,
+        Dict: {"backend", "content": [{"type": "text", "text", "url", "title", "date"}, ...]} ordered by
+              relevance ("date" only when known),
               plus "fallback": true when the backend returned nothing and "auto" was used.
               All pages share one text budget (MCPSURFR_MAX_CHARS, default 40k chars); cut pages
               have "truncated": true and their full "chars". Also "skipped": [{"url", "reason"}]
@@ -364,7 +372,8 @@ async def search(
             "date". News backends: auto, bing, duckduckgo, yahoo. Pair with recency for current events.
 
     Returns:
-        Dict with "passages": [{"url", "heading", "text", "matched"}, ...] best first, and
+        Dict with "passages": [{"url", "title", "date", "heading", "text", "matched"}, ...] best first
+        ("date" only when the page or news result has one), and
         "tier" ("keywords", "keywords+semantic" or "semantic") saying what picked them.
         "matched" is the share of query and keyword terms in the passage (0-1), comparable
         across calls. Tier "semantic" means nothing matched: at most 4 passages and a "note".
@@ -417,7 +426,8 @@ async def search(
     if not wants_pages:
         return result
     from mcpsurfr.utils.fetch import fit_budget
-    pages = [{"url": u, "text": "\n".join(t for _, t in blocks)} for u, blocks in found["pages"].items()]
+    pages = [{"url": u, "text": "\n".join(t for _, t in blocks)} | found["meta"].get(u, {})
+             for u, blocks in found["pages"].items()]
     return {"query": query, "content": fit_budget(pages, MAX_CHARS)}
 
 async def _find_passages(ctx: Context, query: str, keywords: List[str], num_results: int,
@@ -447,15 +457,15 @@ async def _find_passages(ctx: Context, query: str, keywords: List[str], num_resu
     urls = [r["href"] for r, _ in ranked[:top_pages]]
 
     await ctx.report_progress(2, 4, f"Fetching {len(urls)} pages")
-    pages, skipped = await asyncio.to_thread(fetch_all_blocks, urls)
+    pages, skipped, meta = await asyncio.to_thread(fetch_all_blocks, urls)
     if skipped:
         await ctx.info(f"{len(skipped)} of {len(urls)} pages skipped (blocked, not a web page, empty or duplicate)")
     await ctx.report_progress(3, 4, "Scoring passages")
     chosen, tier, passages = await _pick_passages(query, keywords, urls, pages, max_passages)
-    _add_dates(chosen, results)
+    _add_meta(chosen, results, meta)
     await ctx.report_progress(4, 4, "Done")
     return {"query": query, "passages": chosen, "tier": tier, "pages_fetched": len(pages),
-            "passages_considered": len(passages), "pages": {u: pages[u] for u in urls if u in pages},
+            "passages_considered": len(passages), "pages": {u: pages[u] for u in urls if u in pages}, "meta": meta,
             "skipped": skipped, "warnings": notes, "keywords_missing": _keywords_missing(keywords, passages, tokens)}
 
 async def _pick_passages(query: str, keywords: List[str], urls: List[str], pages: Dict, max_passages: int):
@@ -512,14 +522,17 @@ async def read_url(ctx: Context, url: str, query: str | None = None, keywords: L
         return {"url": url, "error": "only public http(s) URLs can be read"}
     if not query:
         content, skipped = await asyncio.to_thread(fetch_all_content, [url], MAX_CHARS)
-        return {"url": url, "content": content} if content else {"url": url, "error": skipped[0]["reason"]}
+        if not content:
+            return {"url": url, "error": skipped[0]["reason"]}
+        return {"url": url, "content": content} | {k: content[0][k] for k in ("title", "date") if k in content[0]}
 
     keywords = keywords or []
-    pages, skipped = await asyncio.to_thread(fetch_all_blocks, [url])
+    pages, skipped, meta = await asyncio.to_thread(fetch_all_blocks, [url])
     if not pages:
         return {"url": url, "error": skipped[0]["reason"]}
     chosen, tier, _ = await _pick_passages(query, keywords, [url], pages, max_passages)
-    result = {"url": url, "passages": chosen, "tier": tier}
+    _add_meta(chosen, [], meta)
+    result = {"url": url, "passages": chosen, "tier": tier} | meta.get(url, {})
     if tier == "semantic":
         result["note"] = ("Low confidence: no passage contains the query or keyword terms. Try other keywords, "
                           "or call read_url without a query for the whole text.")
