@@ -36,7 +36,8 @@ Local web search with on-device re-ranking, no API keys.
 - Every search tool takes recency ("day", "week", "month", "year"), region ("uk-en"),
   include_domains / exclude_domains, and news=true for news articles with dates.
 - Google often blocks scrapers. When it returns nothing, the server retries with "auto" and says so.
-- Results list pages that couldn't be used in `skipped`, and engine problems in `warnings`.
+- Results list pages that couldn't be used in `skipped`, with the search snippet for each in
+  `snippets`, and engine problems in `warnings`.
 - Cite the source URLs.
 
 Full guide: the skill resource skill://mcpsurfr-search/SKILL.md"""
@@ -120,12 +121,30 @@ async def _warn(ctx: Context, notes: List[str], message: str) -> None:
     notes.append(message)
     await ctx.warning(message)
 
-def _extras(result: Dict, notes: List[str], skipped: List[Dict]) -> Dict:
+def _extras(result: Dict, notes: List[str], skipped: List[Dict], results: List[Dict] | None = None) -> Dict:
     if skipped:
         result["skipped"] = skipped
+        snippets = _snippets(skipped, results or [])
+        if snippets:
+            result["snippets"] = snippets
     if notes:
         result["warnings"] = notes
     return result
+
+def _snippets(skipped: List[Dict], results: List[Dict]) -> List[Dict]:
+    """The search engine's own snippet for each page that couldn't be read (blocked, rendered
+    by JavaScript, behind a login like Reddit), so the model still gets something from it.
+    Near-duplicates are left out: their text is already in the results."""
+    by_url = {r["href"]: r for r in results if r.get("href")}
+    out = []
+    for page in skipped:
+        found = by_url.get(page["url"])
+        if found and found.get("body") and not (page.get("reason") or "").startswith("near-duplicate"):
+            snippet = {"url": page["url"], "title": found.get("title", ""), "text": found["body"]}
+            if found.get("date"):
+                snippet["date"] = found["date"]
+            out.append(snippet)
+    return out
 
 def _filters(recency: str | None = None, region: str | None = None, include_domains: List[str] | None = None,
              exclude_domains: List[str] | None = None, news: bool = False) -> Dict:
@@ -252,7 +271,7 @@ async def _rag_search(ctx: Context, query: str, backend: str, num_results: int, 
     await ctx.report_progress(2, 3, f"Fetching {len(top_results)} pages")
     content, skipped = await _fetch(ctx, top_results, include_urls)
     await ctx.report_progress(3, 3, "Done")
-    return _extras(result, notes, skipped) | {"content": content}
+    return _extras(result, notes, skipped, top_results) | {"content": content}
 
 @mcp.tool(title="Web search", annotations=_READ_ONLY, icons=[_ICON])
 async def rag_search_ddgs(ctx: Context, query: str, num_results:int=10, top_k:int=5, include_urls:bool=True,
@@ -388,7 +407,8 @@ async def search(
         "tier" ("keywords", "keywords+semantic" or "semantic") saying what picked them.
         "matched" is the share of query and keyword terms in the passage (0-1), comparable
         across calls. Tier "semantic" means nothing matched: at most 4 passages and a "note".
-        "skipped": [{"url", "reason"}] lists pages left out, "warnings" any engine failures.
+        "skipped": [{"url", "reason"}] lists pages left out, with "snippets": [{"url", "title", "text"}]
+        holding the search engine's snippet for each one it could; "warnings" any engine failures.
         If the user asked for full pages: "content": [{"type", "text", "url"}, ...] instead.
     """
     keywords = keywords or []
@@ -401,7 +421,7 @@ async def search(
         _recent.set(key, found)
 
     result = _extras({k: found[k] for k in ("query", "passages", "tier", "pages_fetched", "passages_considered")},
-                     found["warnings"], found["skipped"])
+                     found["warnings"], found["skipped"], found["results"])
     low = ("Low confidence: no passage contains the query or keyword terms, so these few were picked by "
            "meaning alone and may be unrelated. Retry with different keywords or synonyms, rephrase the "
            "query, or use rag_search_ddgs for full pages.")
@@ -448,7 +468,7 @@ async def _find_passages(ctx: Context, query: str, keywords: List[str], num_resu
 
     notes = await _start(ctx, opts)
     empty = {"query": query, "passages": [], "tier": None, "pages_fetched": 0, "passages_considered": 0,
-             "pages": {}, "skipped": [], "warnings": notes, "keywords_missing": False}
+             "pages": {}, "meta": {}, "skipped": [], "results": [], "warnings": notes, "keywords_missing": False}
     backend = await _check_backend(ctx, notes, backend, opts)
     await ctx.report_progress(0, 4, f"Searching {backend} for {query!r}")
     results = await _search(ctx, notes, query, backend, num_results, opts)
@@ -477,7 +497,8 @@ async def _find_passages(ctx: Context, query: str, keywords: List[str], num_resu
     await ctx.report_progress(4, 4, "Done")
     return {"query": query, "passages": chosen, "tier": tier, "pages_fetched": len(pages),
             "passages_considered": len(passages), "pages": {u: pages[u] for u in urls if u in pages}, "meta": meta,
-            "skipped": skipped, "warnings": notes, "keywords_missing": _keywords_missing(keywords, passages, tokens)}
+            "skipped": skipped, "results": results, "warnings": notes,
+            "keywords_missing": _keywords_missing(keywords, passages, tokens)}
 
 async def _pick_passages(query: str, keywords: List[str], urls: List[str], pages: Dict, max_passages: int):
     """Tiers 2 and 3: split pages into passages, keywords first, the embedder only if it's
@@ -635,11 +656,11 @@ async def _deep_research_internal(ctx: Context, search_terms:List[str], backends
         _add_meta(picked, unique_results, meta)
         await ctx.report_progress(total, total, "Done")
         result.update(pages_fetched=len(pages), tiers=tiers)
-        return _extras(result, notes, skipped) | {"passages": picked}
+        return _extras(result, notes, skipped, unique_results) | {"passages": picked}
 
     content, skipped = await _fetch(ctx, unique_results, include_urls)
     await ctx.report_progress(total, total, "Done")
-    return _extras(result, notes, skipped) | {"content": content}
+    return _extras(result, notes, skipped, unique_results) | {"content": content}
 
 async def _passages_per_term(terms: List[str], urls: List[str], pages: Dict, max_passages: int):
     """Rank passages for each term on its own, so every angle of the research gets covered,
