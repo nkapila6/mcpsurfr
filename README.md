@@ -37,7 +37,7 @@ What's in it:
 
 The search tools also take `recency` (`day`, `week`, `month`, `year`), `region` (`uk-en`, `de-de`...), `include_domains` / `exclude_domains`, and `news: true` for dated news articles.
 
-The old `rag_search_google`, `deep_research_ddgs` and `deep_research_google` presets are hidden, since every tool costs context in every chat. Set `MCPSURFR_LEGACY_TOOLS=1` if a prompt of yours still names them.
+The old `rag_search_google`, `deep_research_ddgs` and `deep_research_google` presets are hidden, since every tool costs context in every chat. Turn them back on with `MCPSURFR_LEGACY_TOOLS` (see [Options](#options)) if a prompt of yours still names them.
 
 Backends: `auto` (default), `brave`, `duckduckgo`, `google`, `grokipedia`, `mojeek`, `startpage`, `wikipedia`, `yahoo`. `auto` and `brave` are the dependable ones.
 
@@ -79,7 +79,31 @@ Or with Docker (amd64 and arm64):
 }
 ```
 
-Full-page tools share a 40k-character budget per call (about 10k tokens). To change it, add `"env": {"MCPSURFR_MAX_CHARS": "80000"}` to the server entry.
+### Options
+
+Both are optional, set through `env`:
+
+```json
+{
+  "mcpServers": {
+    "mcpsurfr": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/nkapila6/mcpsurfr", "mcpsurfr"],
+      "env": {
+        "MCPSURFR_MAX_CHARS": "80000",
+        "MCPSURFR_LEGACY_TOOLS": "1"
+      }
+    }
+  }
+}
+```
+
+| Variable | Default | What it does |
+|---|---|---|
+| `MCPSURFR_MAX_CHARS` | `40000` | Text budget per call for the full-page tools, shared across pages (~4 chars per token) |
+| `MCPSURFR_LEGACY_TOOLS` | off | `1` brings back `rag_search_google`, `deep_research_ddgs` and `deep_research_google` |
+
+With Docker, `env` only reaches the `docker` command, so pass each one into the container too: `"-e", "MCPSURFR_MAX_CHARS", "-e", "MCPSURFR_LEGACY_TOOLS"` in `args`, before the image name.
 
 Not sure where your config lives? See the [MCP quickstart](https://modelcontextprotocol.io/quickstart/user). Tested with Claude Desktop, Claude Code, Cursor and Goose.
 
