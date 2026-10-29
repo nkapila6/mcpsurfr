@@ -672,17 +672,29 @@ async def _passages_per_term(terms: List[str], urls: List[str], pages: Dict, max
     per = max(2, -(-max_passages // max(1, len(terms))))
     picks, tiers = [], {}
     for term in terms:
-        chosen, tiers[term], _ = await _pick_passages(term, [], urls, pages, per)
+        # rank well past what's needed: one strong page can fill a short list on its
+        # own, and the per-page cap below needs other pages' passages to choose from
+        chosen, tiers[term], _ = await _pick_passages(term, [], urls, pages, max(per * 4, 16))
         picks.append([dict(p, term=term) for p in chosen])
-    merged, seen = [], set()
-    for rank in range(per):
+    # one strong page shouldn't fill the whole answer: research wants several sources
+    cap = max(2, max_passages // 3)
+    merged, leftovers, seen, per_page = [], [], set(), {}
+    for rank in range(max(len(c) for c in picks) if picks else 0):
         for chosen in picks:
-            if rank < len(chosen):
-                key = (chosen[rank]["url"], chosen[rank]["text"][:200])
-                if key not in seen:
-                    seen.add(key)
-                    merged.append(chosen[rank])
-    return merged[:max_passages], tiers
+            if rank >= len(chosen):
+                continue
+            p = chosen[rank]
+            key = (p["url"], p["text"][:200])
+            if key in seen:
+                continue
+            seen.add(key)
+            if per_page.get(p["url"], 0) < cap:
+                per_page[p["url"]] = per_page.get(p["url"], 0) + 1
+                merged.append(p)
+            else:
+                leftovers.append(p)
+    # few relevant pages: fill up from what the cap held back rather than return less
+    return (merged + leftovers)[:max_passages], tiers
 
 @mcp.tool(title="Deep research", annotations=_READ_ONLY, icons=[_ICON])
 async def deep_research(
