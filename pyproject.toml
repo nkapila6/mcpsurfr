@@ -2,7 +2,7 @@
 name = "mcpsurfr"
 version = "1.2.2"
 authors = [{ name = "Nikhil Kapila", email = "info@nkapila.me" }]
-description = "MCP \"server\" that can perform a web search locally without the use of APIs."
+description = "Local web search for LLMs over MCP: no API keys, on-device re-ranking, and only the passages that answer the question."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
