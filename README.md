@@ -51,7 +51,7 @@ What's in it:
 | `search` | Start here: returns only the relevant passages. Pass `keywords` for better hits |
 | `rag_search_ddgs` | Full pages as text (the original mode). Takes a `backend` |
 | `deep_research` | Several search terms across backends, merged and de-duplicated. `passages: true` returns only the relevant passages per term |
-| `read_url` | One page you already have the link for. Pass a `query` to get only the passages that answer it |
+| `read_url` | One page you already have the link for. Pass a `query` for only the passages that answer it, or `outline: true` and then a `section` to read a long page in parts. `format: "markdown"` keeps headings, links and tables |
 
 The search tools also take `recency` (`day`, `week`, `month`, `year`), `region` (`uk-en`, `de-de`...), `include_domains` / `exclude_domains`, and `news: true` for dated news articles.
 

@@ -57,6 +57,10 @@ For one page you already have the link to: a URL the user pasted, or a result yo
 
 - `url`: public http(s) only. Localhost and private network addresses are refused.
 - `query` (optional): what you want from the page. With it you get `passages` and `tier`, picked the same way as `search` (pass `keywords` too). Without it you get the page's main text in `content`, cut to the shared budget.
+- `outline: true`: just the headings, with each one's `level` and size in `chars`. On a long page or PDF (pages show up as `Page N`), look at the outline first, then read only the part you need.
+- `section: "<heading>"`: that section and its subsections, as markdown. An unknown name returns `error` plus the real `headings`.
+- `start` / `max_chars`: a window of the page. Keep reading from `next_start` while it's there.
+- `format: "markdown"`: headings, links, lists, tables and code kept, instead of flat text.
 - If the page can't be used, the result has `error` with the same reasons as `skipped` below.
 
 Long pages and PDFs: pass a `query` rather than reading the whole thing.

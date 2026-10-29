@@ -31,7 +31,7 @@ Local web search with on-device re-ranking, no API keys.
   tokens of full pages). Pass `keywords` with terms and synonyms a good answer would contain.
 - rag_search_ddgs: full pages as text, for when the user wants whole pages. Takes a `backend`.
 - read_url: one page you already have the link for (HTML or PDF). Pass a query to get only
-  the passages that answer it.
+  the passages that answer it, or outline=true then section="..." to read a long page by part.
 - deep_research: broader topics. Give it 2-5 specific, related search_terms. Pass passages=true to
   get only the relevant passages per term instead of full pages.
 - Every search tool takes recency ("day", "week", "month", "year"), region ("uk-en"),
@@ -534,28 +534,46 @@ def _embedder():
 
 @mcp.tool(title="Read a page", annotations=_READ_ONLY, icons=[_ICON])
 async def read_url(ctx: Context, url: str, query: str | None = None, keywords: List[str] | None = None,
-                   max_passages: int = 8) -> Dict:
+                   max_passages: int = 8, outline: bool = False, section: str | None = None,
+                   start: int = 0, max_chars: int | None = None,
+                   format: Literal["text", "markdown"] = "text") -> Dict:
     """
     Read one page whose URL you already have: a link the user pasted, or one from earlier
-    results. HTML or PDF. With a query, returns only the passages that answer it, the same
-    way search does; without one, the page's main text (cut to the shared budget).
+    results. HTML or PDF. Ways to read it, cheapest first:
+    - query: only the passages that answer it, the same way search does.
+    - outline=true: just the headings, each with its level and size. Then ask for one section.
+    - section="<heading>": that section with its subsections, as markdown.
+    - start / max_chars: a window of the page, with "next_start" to continue from.
+    - none of these: the main text, cut to the shared budget.
 
     Args:
         url (str): A public http(s) URL. Localhost and private network addresses are refused.
         query (str | None): What you want from the page. Leave out to get the whole text.
         keywords (List[str] | None): Terms a good answer would contain, as for search.
         max_passages (int): Passages to return when there's a query. Default 8.
+        outline (bool): Return the page's headings instead of its text. Good first step on long
+            pages and PDFs (PDF pages show up as "Page N").
+        section (str | None): A heading from the outline. Exact match first, then the first
+            heading containing it. Returns that section, subsections included, as markdown.
+        start (int): Character offset to read from, e.g. a previous call's "next_start".
+        max_chars (int | None): Most characters to return. Default: the shared budget (MCPSURFR_MAX_CHARS).
+        format (str): "text" (default) or "markdown", which keeps headings, links, lists, tables and code.
 
     Returns:
         With a query: {"url", "passages": [{"url", "heading", "text", "matched"}], "tier"}, plus a
-        "note" when nothing matched the terms. Without: {"url", "content": [{"type", "text", "url"}]},
-        cut pages marked "truncated". {"url", "error"} when the page couldn't be read.
+        "note" when nothing matched the terms. With outline: {"url", "outline": [{"heading", "level",
+        "chars"}], "total_chars"}. With section, start, max_chars or format: {"url", "content": [{"type",
+        "text", "url"}], "start", "end", "total_chars"}, plus "next_start" when there's more. Otherwise
+        {"url", "content"}, cut pages marked "truncated". {"url", "error"} when the page couldn't be
+        read; for an unknown section, "headings" lists the ones there are.
     """
     from mcpsurfr.utils.fetch import fetch_all_blocks, fetch_all_content
     from mcpsurfr.utils.tools import public_url
 
     if not public_url(url):
         return {"url": url, "error": "only public http(s) URLs can be read"}
+    if not query and (outline or section or start or max_chars or format == "markdown"):
+        return await asyncio.to_thread(_read_piece, url, outline, section, start, max_chars, format)
     if not query:
         content, skipped = await asyncio.to_thread(fetch_all_content, [url], MAX_CHARS)
         if not content:
@@ -572,6 +590,35 @@ async def read_url(ctx: Context, url: str, query: str | None = None, keywords: L
     if tier == "semantic":
         result["note"] = ("Low confidence: no passage contains the query or keyword terms. Try other keywords, "
                           "or call read_url without a query for the whole text.")
+    return result
+
+def _read_piece(url: str, want_outline: bool, section_name: str | None, start: int,
+                max_chars: int | None, fmt: str) -> Dict:
+    """read_url's outline, section and windowed reads, all cut from the page's markdown."""
+    from mcpsurfr.utils import markdown as md
+    from mcpsurfr.utils.fetch import clip, fetch_doc
+
+    doc = fetch_doc(url)
+    if "reason" in doc:
+        return {"url": url, "error": doc["reason"]}
+    meta = {k: doc[k] for k in ("title", "date") if doc.get(k)}
+    markdown = doc.get("markdown") or md.blocks_to_markdown(doc["blocks"])
+    if want_outline:
+        return {"url": url, "outline": md.outline(markdown), "total_chars": len(markdown)} | meta
+    if section_name:
+        body = md.section(markdown, section_name)
+        if body is None:
+            heads = [h["heading"] for h in md.outline(markdown)]
+            return {"url": url, "error": f"no section matching {section_name!r}", "headings": heads[:60]} | meta
+    else:
+        body = markdown if fmt == "markdown" else doc["text"]
+    start = max(0, start)
+    piece = clip(body[start:], max_chars or MAX_CHARS)
+    end = start + len(piece)
+    result = {"url": url, "content": [{"type": "text", "text": piece, "url": url}],
+              "start": start, "end": end, "total_chars": len(body)} | meta
+    if end < len(body.rstrip()):
+        result["next_start"] = end
     return result
 
 async def _deep_research_internal(ctx: Context, search_terms:List[str], backends:List[str], num_results_per_term:int=5,top_k_per_term:int=3, include_urls:bool=True,

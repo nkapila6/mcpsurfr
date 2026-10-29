@@ -16,6 +16,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import unquote
 
 from .extract import extract_blocks, extract_main_text, fragment_text
+from .markdown import blocks_to_markdown
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +48,8 @@ def _doc(url: str, blocks: List[Tuple[str, str]], title: str = "", date: str = "
     blocks = [(h, t) for h, t in blocks if t.strip()]
     if not blocks:
         return None
-    doc = {"url": url, "blocks": blocks, "text": "\n\n".join(f"{h}\n{t}" if h else t for h, t in blocks)}
+    doc = {"url": url, "blocks": blocks, "text": "\n\n".join(f"{h}\n{t}" if h else t for h, t in blocks),
+           "markdown": blocks_to_markdown(blocks)}
     if title:
         doc["title"] = title
     if date:
