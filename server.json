@@ -22,6 +22,21 @@
           "description": "Text budget per call for the full-page tools, shared across pages (~4 chars per token).",
           "format": "number",
           "default": "40000"
+        },
+        {
+          "name": "MCPSURFR_DEEP_RESEARCH_MODE",
+          "description": "What deep_research returns when a call doesn't say: full pages, or only the passages that answer each term (about a tenth of the tokens).",
+          "choices": [
+            "pages",
+            "passages"
+          ],
+          "default": "pages"
+        },
+        {
+          "name": "MCPSURFR_CACHE_TTL",
+          "description": "Seconds searches and fetched pages are reused. 0 turns the cache off.",
+          "format": "number",
+          "default": "300"
         }
       ]
     },
@@ -37,6 +52,21 @@
           "description": "Text budget per call for the full-page tools, shared across pages (~4 chars per token).",
           "format": "number",
           "default": "40000"
+        },
+        {
+          "name": "MCPSURFR_DEEP_RESEARCH_MODE",
+          "description": "What deep_research returns when a call doesn't say: full pages, or only the passages that answer each term (about a tenth of the tokens).",
+          "choices": [
+            "pages",
+            "passages"
+          ],
+          "default": "pages"
+        },
+        {
+          "name": "MCPSURFR_CACHE_TTL",
+          "description": "Seconds searches and fetched pages are reused. 0 turns the cache off.",
+          "format": "number",
+          "default": "300"
         }
       ]
     }

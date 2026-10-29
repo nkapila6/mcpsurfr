@@ -817,7 +817,7 @@ def research(topic: str) -> str:
     return (
         f"Research this topic: {topic}\n\n"
         "1. Come up with 3-5 specific search terms that cover different angles of it.\n"
-        "2. Call deep_research with those terms (the default backend is fine).\n"
+        "2. Call deep_research with those terms and passages=true (the default backend is fine).\n"
         "3. Write a concise summary. Cite the source URL for each claim, and point out "
         "where sources disagree or look out of date."
     )

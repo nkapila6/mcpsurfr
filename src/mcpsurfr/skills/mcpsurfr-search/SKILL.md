@@ -45,6 +45,7 @@ Full page text (main content only, code blocks and tables kept) for the top `top
 - `search_terms`: 2-5 related queries, each covering a different angle (not just rewordings)
 - `backends` (default `["auto"]`): `auto`, `brave`, `duckduckgo`, `google`, `grokipedia`, `mojeek`, `startpage`, `wikipedia`, `yahoo`
 - `top_k_per_term` (3)
+- `passages`: **pass `true`** unless the user wants whole pages. You get `passages` (each tagged with the `term` it answers, every term's best first) instead of full pages, about a tenth of the text. `max_passages` (12) caps them across all terms, and `tiers` gives each term's tier as in `search`. Left out, the server's `MCPSURFR_DEEP_RESEARCH_MODE` setting decides, which is full pages unless the user changed it.
 
 `search_summary` in the result shows which engines actually delivered, and `fallback: "auto"` means none of the chosen ones did. Full pages come back within the same shared budget, so more terms means less text per page. For one focused question, `search` is better.
 
@@ -60,6 +61,8 @@ For one page you already have the link to: a URL the user pasted, or a result yo
 
 Long pages and PDFs: pass a `query` rather than reading the whole thing.
 
+Stack Overflow and other Stack Exchange questions, Wikipedia articles and GitHub repos or files are read through those sites' APIs, so they work even where the normal page is blocked. A Stack Exchange question comes back as the question, then the accepted answer, then the rest by votes, with each answer's score in its `heading`.
+
 ## Backends
 
 `auto` (best: falls back across engines) and `brave` (fast, usually up) are dependable. With `recency` set, `auto` uses only the engines that honour dates. `wikipedia` is an exact-title lookup. `duckduckgo` and `yahoo` get rate-limited at times. `google`, `startpage` and `mojeek` are often blocked. Empty engines, fallbacks and unknown names show up in the result's `warnings`.
@@ -72,11 +75,13 @@ PDF links are read like pages, first 50 pages only. Passages from them have a `h
 
 ## Skipped pages
 
-The search tools list pages they couldn't use in `skipped: [{url, reason}]`: `HTTP 403`, `timed out`, `couldn't connect`, `not a web page` (images, archives...), `scanned PDF (no text layer)`, `PDF too large`, `unreadable PDF`, `no readable content` (nav only or JavaScript-rendered), or `near-duplicate of <url>` (the same text at another address). Fewer pages than asked for is normal. If the one you needed is skipped, say so rather than guessing its content.
+The search tools list pages they couldn't use in `skipped: [{url, reason}]`: `HTTP 403`, `timed out`, `couldn't connect`, `not a web page` (images, archives...), `scanned PDF (no text layer)`, `PDF too large`, `unreadable PDF`, `no readable content` (nav only or JavaScript-rendered), or `near-duplicate of <url>` (the same text at another address). Fewer pages than asked for is normal.
+
+For each skipped page the search engine gave a snippet for, `snippets: [{url, title, text}]` holds it. That's how Reddit threads (behind a login) and msn.com news (rendered by JavaScript) still show up. A snippet is a short excerpt, not the page: use it for leads, quote it as the search snippet, and if the page itself mattered, say you couldn't read it rather than guessing the rest.
 
 ## Using results
 
 1. Cite the `url` of everything you use.
-2. Check dates, and say when a source looks stale.
+2. Check dates, and say when a source looks stale. Pages and passages carry `title`, and `date` (YYYY-MM-DD, or a full timestamp for news) when the page or news result has one.
 3. Cross-check important facts across two sources.
 4. Thin results: add keywords and synonyms, rephrase, raise `num_results`, or switch tools as in the table above.

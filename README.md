@@ -39,15 +39,18 @@ What's in it:
 - **No API keys.** Searches go through [ddgs](https://github.com/deedy5/ddgs). Its `auto` mode asks several engines at once and skips blocked ones.
 - **Ranked locally.** A small MobileBERT model on plain numpy re-ranks results, so only the best pages get fetched.
 - **Clean text.** Pages are fetched with browser impersonation, and only the main content is kept: no menus, cookie banners or footers. Code blocks and tables keep their lines. PDFs are read too (text layer, first 50 pages). The same page under two URLs comes back once.
-- **Passages instead of pages.** `search` returns just the paragraphs that answer the question, about a tenth of the tokens. When nothing matches well, it can ask you whether you want the full pages instead.
-- **Says what it left out.** Results list skipped pages with a reason (blocked, JavaScript-only, duplicate...), cut pages are marked `truncated`, and fallbacks and engine failures show up as `warnings`. Google blocks often, so it falls back to `auto` on its own.
+- **Passages instead of pages.** `search` returns just the paragraphs that answer the question, about a tenth of the tokens, and `deep_research` can do the same per search term. When nothing matches well, `search` can ask you whether you want the full pages instead.
+- **Reads the sites that block scrapers.** Stack Overflow and the other Stack Exchange sites, Wikipedia and GitHub go through their free APIs: questions with the accepted answer first, articles by section, READMEs and raw files.
+- **Titles and dates.** Every page and passage carries its title, and its publish date when the page or news result has one.
+- **Says what it left out.** Results list skipped pages with a reason (blocked, JavaScript-only, duplicate...) and the search snippet for each, so a Reddit thread or an msn.com article still says something. Cut pages are marked `truncated`, and fallbacks and engine failures show up as `warnings`. Google blocks often, so it falls back to `auto` on its own.
+- **Quick on repeats.** Searches and pages are kept for five minutes, so a follow-up call on the same pages doesn't fetch them again.
 - **Brings its own guide.** It serves a skill and a `research` prompt, so clients pick up how to use it without setup.
 
 | Tool | Use it for |
 |---|---|
 | `search` | Start here: returns only the relevant passages. Pass `keywords` for better hits |
 | `rag_search_ddgs` | Full pages as text (the original mode). Takes a `backend` |
-| `deep_research` | Several search terms across backends, merged and de-duplicated |
+| `deep_research` | Several search terms across backends, merged and de-duplicated. `passages: true` returns only the relevant passages per term |
 | `read_url` | One page you already have the link for. Pass a `query` to get only the passages that answer it |
 
 The search tools also take `recency` (`day`, `week`, `month`, `year`), `region` (`uk-en`, `de-de`...), `include_domains` / `exclude_domains`, and `news: true` for dated news articles.
@@ -98,14 +101,16 @@ Or with Docker (amd64 and arm64):
 
 ### Options
 
-Both settings are optional and go in the server entry's `env`.
+All settings are optional and go in the server entry's `env`.
 
 | Variable | Default | What it does |
 |---|---|---|
 | `MCPSURFR_MAX_CHARS` | `40000` | Text budget per call when returning full pages (`rag_search_ddgs`, `deep_research`, `read_url` without a query), shared across pages. ~4 chars per token |
+| `MCPSURFR_DEEP_RESEARCH_MODE` | `pages` | What `deep_research` returns when a call doesn't say: `pages` (full text) or `passages` (only what answers each term, about a tenth of the tokens) |
+| `MCPSURFR_CACHE_TTL` | `300` | Seconds searches and fetched pages are reused. `0` turns the cache off. News searches are never cached |
 | `MCPSURFR_LEGACY_TOOLS` | off | `1` brings back `rag_search_google`, `deep_research_ddgs` and `deep_research_google` |
 
-A normal setup only ever needs the budget, if anything:
+A normal setup, with `deep_research` set to passages and a bigger budget for full pages:
 
 ```json
 {
@@ -114,6 +119,7 @@ A normal setup only ever needs the budget, if anything:
       "command": "uvx",
       "args": ["mcpsurfr"],
       "env": {
+        "MCPSURFR_DEEP_RESEARCH_MODE": "passages",
         "MCPSURFR_MAX_CHARS": "80000"
       }
     }
