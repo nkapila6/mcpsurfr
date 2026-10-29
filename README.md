@@ -101,7 +101,7 @@ Or with Docker (amd64 and arm64):
 
 ### Options
 
-All settings are optional and go in the server entry's `env`. This config sets each one to its default, so change only what you need:
+All settings are optional. These configs set each one to its default, so change only what you need. With uvx they go in `env`:
 
 ```json
 {
@@ -129,13 +129,24 @@ All settings are optional and go in the server entry's `env`. This config sets e
 
 Why the legacy tools are off: they're just `rag_search_ddgs` and `deep_research` with a fixed `backend`, which the search tools now take themselves. Each tool's name, description and parameters get sent to the model in every chat whether it's used or not, so three duplicates cost context for nothing and give the model more ways to pick the wrong one.
 
-With Docker, `env` only reaches the `docker` command, not the container. Pass the settings with `-e` in `args` instead, before the image name:
+With Docker, `env` only reaches the `docker` command, not the container, so the settings go in `args` with `-e`, before the image name. The same defaults:
 
 ```json
-"args": ["run", "--rm", "-i", "--init",
-         "-e", "MCPSURFR_MAX_CHARS=40000", "-e", "MCPSURFR_DEEP_RESEARCH_MODE=pages",
-         "-e", "MCPSURFR_CACHE_TTL=300", "-e", "MCPSURFR_LEGACY_TOOLS=0",
-         "ghcr.io/nkapila6/mcpsurfr:latest"]
+{
+  "mcpServers": {
+    "mcpsurfr": {
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i", "--init",
+        "-e", "MCPSURFR_MAX_CHARS=40000",
+        "-e", "MCPSURFR_DEEP_RESEARCH_MODE=pages",
+        "-e", "MCPSURFR_CACHE_TTL=300",
+        "-e", "MCPSURFR_LEGACY_TOOLS=0",
+        "ghcr.io/nkapila6/mcpsurfr:latest"
+      ]
+    }
+  }
+}
 ```
 
 Not sure where your config lives? See the [MCP quickstart](https://modelcontextprotocol.io/quickstart/user). Tested with Claude Desktop, Claude Code, Cursor and Goose.
