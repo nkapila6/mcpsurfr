@@ -22,6 +22,7 @@ NEWS_BACKENDS = ("auto", "bing", "duckduckgo", "yahoo")
 Recency = Literal["day", "week", "month", "year"]
 _RECENCY = {"day": "d", "week": "w", "month": "m", "year": "y"}
 _REGION = re.compile(r"^[a-z]{2}-[a-z]{2}$")
+_ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 INSTRUCTIONS = """\
 Local web search with on-device re-ranking, no API keys.
@@ -215,6 +216,9 @@ async def _search(ctx: Context, notes: List[str], query: str, backend: str, max_
     for r in results:
         # news results call the link "url"
         r.setdefault("href", r.get("url"))
+        # some news engines send "Opinion14 hours ago" instead of a date
+        if r.get("date") and not _ISO_DATE.match(str(r["date"])):
+            del r["date"]
     kept = [r for r in results if domain_ok(r.get("href") or "", include, exclude)]
     if results and not kept:
         await _warn(ctx, notes, f"{backend} found results for {query!r}, but none on the allowed domains")
