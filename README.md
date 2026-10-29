@@ -103,6 +103,8 @@ Both are optional, set through `env`:
 | `MCPSURFR_MAX_CHARS` | `40000` | Text budget per call for the full-page tools, shared across pages (~4 chars per token) |
 | `MCPSURFR_LEGACY_TOOLS` | off | `1` brings back `rag_search_google`, `deep_research_ddgs` and `deep_research_google` |
 
+Why the legacy tools are off: they're just `rag_search_ddgs` and `deep_research` with a fixed `backend`, which the search tools now take themselves. Each tool's name, description and parameters get sent to the model in every chat whether it's used or not, so three duplicates cost context for nothing and give the model more ways to pick the wrong one. Turn them on only if a prompt or workflow of yours calls them by name.
+
 With Docker, `env` only reaches the `docker` command, so pass each one into the container too: `"-e", "MCPSURFR_MAX_CHARS", "-e", "MCPSURFR_LEGACY_TOOLS"` in `args`, before the image name.
 
 Not sure where your config lives? See the [MCP quickstart](https://modelcontextprotocol.io/quickstart/user). Tested with Claude Desktop, Claude Code, Cursor and Goose.
