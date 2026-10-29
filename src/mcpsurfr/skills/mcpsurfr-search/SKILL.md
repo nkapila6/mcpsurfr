@@ -21,7 +21,10 @@ mcpsurfr searches the web through ddgs, ranks the results on-device, and fetches
 
 - `recency`: `day`, `week`, `month` or `year`. Use it for news, releases, prices, anything time-sensitive.
 - `region`: a code like `uk-en` or `de-de` for local results.
-- `include_domains` / `exclude_domains`: e.g. `["python.org"]` to stick to official docs, `["pinterest.com"]` to drop noise. Subdomains count.
+- `include_domains` / `exclude_domains`: e.g. `["python.org"]` to stick to official docs, `["pinterest.com"]` to drop noise. Subdomains count, and a path narrows to part of a site: `["kubernetes.io/docs"]`.
+- `domain_mode: "prefer"`: rank `include_domains` first but keep other results, for "official docs first, but don't miss a good answer elsewhere".
+- `exact_match: true` (`search`, `rag_search_ddgs`): put the must-have phrases in double quotes in the query, e.g. `sqlite "busy_timeout"`; pages without every quoted phrase are dropped, listed in `skipped`.
+- `fresh: true`: skip the five-minute cache, for something that just changed or when the user asks to check again.
 - `news: true`: news articles instead of web pages, each with its published `date`. News backends are `auto`, `bing`, `duckduckgo`, `yahoo`. Combine with `recency` for current events. Some news sites (msn.com) render with JavaScript and end up in `skipped`.
 
 ## `search` (start here)

@@ -53,7 +53,7 @@ What's in it:
 | `deep_research` | Several search terms across backends, merged and de-duplicated. `passages: true` returns only the relevant passages per term |
 | `read_url` | One page you already have the link for. Pass a `query` to get only the passages that answer it |
 
-The search tools also take `recency` (`day`, `week`, `month`, `year`), `region` (`uk-en`, `de-de`...), `include_domains` / `exclude_domains`, and `news: true` for dated news articles.
+The search tools also take `recency` (`day`, `week`, `month`, `year`), `region` (`uk-en`, `de-de`...), `include_domains` / `exclude_domains` (paths work, like `kubernetes.io/docs`, and `domain_mode: "prefer"` ranks them first instead of filtering), `news: true` for dated news articles, and `fresh: true` to skip the cache. `search` and `rag_search_ddgs` also take `exact_match: true` to keep only pages with every "quoted phrase" in the query.
 
 The old `rag_search_google`, `deep_research_ddgs` and `deep_research_google` presets are hidden by default. [Options](#options) says why and how to turn them back on.
 
