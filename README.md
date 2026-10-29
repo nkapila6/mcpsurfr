@@ -31,10 +31,10 @@ What's in it:
 | Tool | Use it for |
 |---|---|
 | `search` | Start here: returns only the relevant passages. Pass `keywords` for better hits |
-| `rag_search_ddgs` | Full pages as text (the original mode) |
-| `rag_search_google` | Same, via Google (falls back to `auto` when blocked) |
+| `rag_search_ddgs` | Full pages as text (the original mode). Takes a `backend` |
 | `deep_research` | Several search terms across backends, merged and de-duplicated |
-| `deep_research_ddgs` / `deep_research_google` | `deep_research` shortcuts |
+
+The old `rag_search_google`, `deep_research_ddgs` and `deep_research_google` presets are hidden, since every tool costs context in every chat. Set `MCPSURFR_LEGACY_TOOLS=1` if a prompt of yours still names them.
 
 Backends: `auto` (default), `brave`, `duckduckgo`, `google`, `grokipedia`, `mojeek`, `startpage`, `wikipedia`, `yahoo`. `auto` and `brave` are the dependable ones.
 

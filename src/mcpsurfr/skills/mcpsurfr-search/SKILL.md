@@ -14,7 +14,7 @@ mcpsurfr searches the web through ddgs, ranks the results on-device, and fetches
 | Almost any question | `search` |
 | The user wants whole pages, or `search` came back thin | `rag_search_ddgs` |
 | A topic that needs several angles or sources | `deep_research` |
-| The user asks for Google specifically | `rag_search_google` / `deep_research_google` |
+| The user asks for a specific engine | any of the above with `backend` (or `backends`) |
 
 ## `search` (start here)
 
@@ -28,9 +28,9 @@ It returns `passages`: `[{url, heading, text, matched}]`, best first, plus `tier
 - `matched` is the share of your query and keyword terms that the passage contains (0-1). It means the same in every call, so 0.1 is weak whatever else came back.
 - A `note` means low confidence: either the `semantic` tier, or none of your `keywords` appear on any page. Retry with other keywords or synonyms, or use `rag_search_ddgs`. On `semantic`, the user may be asked whether they want full pages instead. If they say yes, you get `content` (full page text) rather than `passages`.
 
-## `rag_search_ddgs` / `rag_search_google`
+## `rag_search_ddgs`
 
-Full page text (main content only, code blocks and tables kept) for the top `top_k` results. All pages share one budget, 40k characters by default. A page that didn't fit whole has `truncated: true` and its full length in `chars`. `rag_search_ddgs` uses ddgs "auto" metasearch, which covers several engines and skips blocked ones. Google often blocks scrapers. When it returns nothing, the server retries with "auto" and warns you.
+Full page text (main content only, code blocks and tables kept) for the top `top_k` results. All pages share one budget, 40k characters by default. A page that didn't fit whole has `truncated: true` and its full length in `chars`. `backend` defaults to "auto", ddgs metasearch over several engines that skips blocked ones. Google often blocks scrapers. When it returns nothing, the server retries with "auto" and warns you.
 
 ## `deep_research`
 

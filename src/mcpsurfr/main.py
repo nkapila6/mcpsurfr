@@ -18,7 +18,7 @@ Local web search with on-device re-ranking, no API keys.
 
 - search: use this first. Returns only the passages that answer the query (about a tenth of the
   tokens of full pages). Pass `keywords` with terms and synonyms a good answer would contain.
-- rag_search_ddgs: full pages as text, for when the user wants whole pages.
+- rag_search_ddgs: full pages as text, for when the user wants whole pages. Takes a `backend`.
 - deep_research: broader topics. Give it 2-5 specific, related search_terms. Default backend is "auto".
 - Google often blocks scrapers. When it returns nothing, the server retries with "auto" and says so.
 - Results list pages that couldn't be used in `skipped`, and engine problems in `warnings`.
@@ -38,6 +38,13 @@ mcp = FastMCP("mcpsurfr", instructions=INSTRUCTIONS, website_url="https://github
 # serves the bundled skill as resources, so clients don't have to install it by hand
 mcp.add_provider(SkillsDirectoryProvider(roots=_HERE / "skills"))
 log = logging.getLogger(__name__)
+
+# rag_search_google and the deep_research_* presets are only backend= shortcuts. Every
+# tool schema costs context in every chat, so they show up only for setups that name them.
+LEGACY_TOOLS = os.environ.get("MCPSURFR_LEGACY_TOOLS", "").strip().lower() in ("1", "true", "yes")
+
+def _legacy_tool(**kwargs):
+    return mcp.tool(**kwargs) if LEGACY_TOOLS else (lambda fn: fn)
 
 def _budget() -> int:
     """Characters of page text one call may return, shared across its pages. Set
@@ -109,7 +116,11 @@ async def _fetch(ctx: Context, results: List[Dict], include_urls: bool):
 async def _rag_search(ctx: Context, query: str, backend: str, num_results: int, top_k: int, include_urls: bool) -> Dict:
     from mcpsurfr.utils.tools import sort_by_score
 
-    notes, result = [], {"backend": backend}
+    notes = []
+    if backend not in BACKENDS:
+        await _warn(ctx, notes, f"Unknown backend {backend!r}, used auto. Available: {', '.join(BACKENDS)}")
+        backend = "auto"
+    result = {"backend": backend}
     await ctx.report_progress(0, 3, f"Searching {backend} for {query!r}")
     results = await _search(ctx, notes, query, backend, num_results)
     if not results and backend != "auto":
@@ -129,12 +140,12 @@ async def _rag_search(ctx: Context, query: str, backend: str, num_results: int, 
     return _extras(result, notes, skipped) | {"content": content}
 
 @mcp.tool(title="Web search", annotations=_READ_ONLY, icons=[_ICON])
-async def rag_search_ddgs(ctx: Context, query: str, num_results:int=10, top_k:int=5, include_urls:bool=True) -> Dict:
+async def rag_search_ddgs(ctx: Context, query: str, num_results:int=10, top_k:int=5, include_urls:bool=True,
+                          backend: str = "auto") -> Dict:
     """
-    Search the web and return the most relevant pages as text. Default choice for lookups.
-    Uses ddgs "auto" metasearch, which queries several engines (DuckDuckGo, Brave,
-    Wikipedia, ...) and skips any that are blocked. Results are re-ranked locally
-    by semantic similarity to the query before the top pages are fetched.
+    Search the web and return the most relevant pages as text, for when whole pages are
+    wanted (search returns only the relevant passages). Results are re-ranked locally by
+    semantic similarity to the query before the top pages are fetched.
 
     Args:
         query (str): The search query. Use natural language questions or keywords.
@@ -146,16 +157,20 @@ async def rag_search_ddgs(ctx: Context, query: str, num_results:int=10, top_k:in
                     Default: 5
         include_urls (bool): Whether to include each page's source URL for citation.
                             Default: True
+        backend (str): Search backend, same names as deep_research. Default "auto" (ddgs
+                       metasearch over several engines, skipping blocked ones). Non-auto
+                       backends that return nothing are retried with "auto".
 
     Returns:
-        Dict: {"backend", "content": [{"type": "text", "text", "url"}, ...]} ordered by relevance.
+        Dict: {"backend", "content": [{"type": "text", "text", "url"}, ...]} ordered by relevance,
+              plus "fallback": true when the backend returned nothing and "auto" was used.
               All pages share one text budget (MCPSURFR_MAX_CHARS, default 40k chars); cut pages
               have "truncated": true and their full "chars". Also "skipped": [{"url", "reason"}]
               for pages left out, and "warnings" when an engine failed.
     """
-    return await _rag_search(ctx, query, "auto", num_results, top_k, include_urls)
+    return await _rag_search(ctx, query, backend, num_results, top_k, include_urls)
 
-@mcp.tool(title="Google search", annotations=_READ_ONLY, icons=[_ICON])
+@_legacy_tool(title="Google search", annotations=_READ_ONLY, icons=[_ICON])
 async def rag_search_google(ctx: Context, query: str, num_results:int=10, top_k:int=5, include_urls:bool=True) -> Dict:
     """
     Search Google and return the most relevant pages as text, re-ranked locally by
@@ -478,7 +493,7 @@ async def deep_research(
     )
 
 
-@mcp.tool(title="Deep research (Google)", annotations=_READ_ONLY, icons=[_ICON])
+@_legacy_tool(title="Deep research (Google)", annotations=_READ_ONLY, icons=[_ICON])
 async def deep_research_google(ctx: Context, search_terms: List[str], num_results_per_term:int=10, top_k_per_term:int=3, include_urls:bool=True) -> Dict:
     """
     Deep research using only Google: each term is searched, re-ranked locally, de-duplicated
@@ -504,7 +519,7 @@ async def deep_research_google(ctx: Context, search_terms: List[str], num_result
     )
 
 
-@mcp.tool(title="Deep research (ddgs auto)", annotations=_READ_ONLY, icons=[_ICON])
+@_legacy_tool(title="Deep research (ddgs auto)", annotations=_READ_ONLY, icons=[_ICON])
 async def deep_research_ddgs(ctx: Context, search_terms: List[str], num_results_per_term:int=10, top_k_per_term:int=3, include_urls:bool=True) -> Dict:
     """
     Deep research using ddgs "auto" metasearch, which queries several engines per term
