@@ -16,6 +16,12 @@ mcpsurfr searches the web through ddgs, ranks the results on-device, and fetches
 | A topic that needs several angles or sources | `deep_research` |
 | The user asks for a specific engine | any of the above with `backend` (or `backends`) |
 
+## Filters (every tool)
+
+- `recency`: `day`, `week`, `month` or `year`. Use it for news, releases, prices, anything time-sensitive.
+- `region`: a code like `uk-en` or `de-de` for local results.
+- `include_domains` / `exclude_domains`: e.g. `["python.org"]` to stick to official docs, `["pinterest.com"]` to drop noise. Subdomains count.
+
 ## `search` (start here)
 
 - `query`: the question in natural language

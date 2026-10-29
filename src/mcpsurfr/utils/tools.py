@@ -7,7 +7,35 @@ Created on 2025-06-04 23:01:38 Wednesday
 """
 
 from typing import List, Dict
+from urllib.parse import urlparse
 
 def sort_by_score(results: List[Dict]) -> List[Dict]:
     """Sort results by similarity score."""
     return sorted(results, key=lambda x: x['score'], reverse=True)
+# --- domain filters ------------------------------------------------------------
+
+def clean_domains(domains: List[str] | None) -> List[str]:
+    """"https://www.Example.com/docs" -> "example.com", so the model can pass URLs or hosts."""
+    out = []
+    for d in domains or []:
+        d = d.strip().lower()
+        host = (urlparse(d if "//" in d else f"//{d}").hostname or "").removeprefix("www.")
+        if host and host not in out:
+            out.append(host)
+    return out
+
+def _host_in(url: str, domains: List[str]) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    # subdomains count: docs.python.org is under python.org
+    return any(host == d or host.endswith(f".{d}") for d in domains)
+
+def domain_ok(url: str, include: List[str], exclude: List[str]) -> bool:
+    return (not include or _host_in(url, include)) and not _host_in(url, exclude)
+
+def site_query(query: str, include: List[str]) -> str:
+    """Ask the engines for the domains up front. Not every engine honours site:,
+    so results still go through domain_ok afterwards."""
+    if not include:
+        return query
+    sites = " OR ".join(f"site:{d}" for d in include)
+    return f"{query} {sites}" if len(include) == 1 else f"{query} ({sites})"

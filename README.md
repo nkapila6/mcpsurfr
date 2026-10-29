@@ -34,6 +34,8 @@ What's in it:
 | `rag_search_ddgs` | Full pages as text (the original mode). Takes a `backend` |
 | `deep_research` | Several search terms across backends, merged and de-duplicated |
 
+Every tool also takes `recency` (`day`, `week`, `month`, `year`), `region` (`uk-en`, `de-de`...) and `include_domains` / `exclude_domains`.
+
 The old `rag_search_google`, `deep_research_ddgs` and `deep_research_google` presets are hidden, since every tool costs context in every chat. Set `MCPSURFR_LEGACY_TOOLS=1` if a prompt of yours still names them.
 
 Backends: `auto` (default), `brave`, `duckduckgo`, `google`, `grokipedia`, `mojeek`, `startpage`, `wikipedia`, `yahoo`. `auto` and `brave` are the dependable ones.

@@ -1,7 +1,7 @@
-import asyncio, base64, logging, os
+import asyncio, base64, logging, os, re
 from collections import OrderedDict
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Literal
 
 from fastmcp import FastMCP, Context
 from fastmcp.server.providers.skills import SkillsDirectoryProvider
@@ -12,6 +12,13 @@ _HERE = Path(__file__).parent
 # ddgs text backends. "auto" is ddgs's metasearch: it queries several engines in
 # parallel and moves on when one is blocked, so it's the dependable default.
 BACKENDS = ("auto", "brave", "duckduckgo", "google", "grokipedia", "mojeek", "startpage", "wikipedia", "yahoo")
+# wikipedia, grokipedia and mojeek ignore date limits, so "auto" with a recency filter
+# sticks to the engines that honour it instead of mixing in undated results
+DATED_AUTO = "brave,duckduckgo,google,startpage,yahoo"
+
+Recency = Literal["day", "week", "month", "year"]
+_RECENCY = {"day": "d", "week": "w", "month": "m", "year": "y"}
+_REGION = re.compile(r"^[a-z]{2}-[a-z]{2}$")
 
 INSTRUCTIONS = """\
 Local web search with on-device re-ranking, no API keys.
@@ -20,6 +27,8 @@ Local web search with on-device re-ranking, no API keys.
   tokens of full pages). Pass `keywords` with terms and synonyms a good answer would contain.
 - rag_search_ddgs: full pages as text, for when the user wants whole pages. Takes a `backend`.
 - deep_research: broader topics. Give it 2-5 specific, related search_terms. Default backend is "auto".
+- Every search tool takes recency ("day", "week", "month", "year"), region ("uk-en"), and
+  include_domains / exclude_domains.
 - Google often blocks scrapers. When it returns nothing, the server retries with "auto" and says so.
 - Results list pages that couldn't be used in `skipped`, and engine problems in `warnings`.
 - Cite the source URLs.
@@ -91,15 +100,49 @@ def _extras(result: Dict, notes: List[str], skipped: List[Dict]) -> Dict:
         result["warnings"] = notes
     return result
 
-async def _search(ctx: Context, notes: List[str], query: str, backend: str, max_results: int) -> List[Dict]:
+def _filters(recency: str | None = None, region: str | None = None, include_domains: List[str] | None = None,
+             exclude_domains: List[str] | None = None) -> Dict:
+    """The search filters every tool takes, cleaned up. "problems" holds the ones that were dropped."""
+    from mcpsurfr.utils.tools import clean_domains
+    opts = {"include": clean_domains(include_domains), "exclude": clean_domains(exclude_domains), "problems": []}
+    if recency:
+        opts["timelimit"] = _RECENCY[recency]
+    region = (region or "").strip().lower()
+    if _REGION.match(region):
+        opts["region"] = region
+    elif region:
+        opts["problems"].append(f"Region {region!r} ignored, expected a code like us-en, uk-en, de-de or wt-wt")
+    return opts
+
+async def _start(ctx: Context, opts: Dict) -> List[str]:
+    """A call's warning list, starting with any filters that were dropped."""
+    notes = []
+    for message in opts["problems"]:
+        await _warn(ctx, notes, message)
+    return notes
+
+async def _search(ctx: Context, notes: List[str], query: str, backend: str, max_results: int,
+                  opts: Dict | None = None) -> List[Dict]:
     from ddgs import DDGS
+    from mcpsurfr.utils.tools import domain_ok, site_query
+    opts = opts or {}
+    include, exclude = opts.get("include", []), opts.get("exclude", [])
+    kwargs = {k: opts[k] for k in ("timelimit", "region") if k in opts}
+    engines = DATED_AUTO if backend == "auto" and "timelimit" in opts else backend
+    # off-domain results get dropped below, so ask for more up front
+    wanted = max_results * 3 if include or exclude else max_results
     try:
-        return await asyncio.to_thread(DDGS().text, query, max_results=max_results, backend=backend)
+        results = await asyncio.to_thread(DDGS().text, site_query(query, include), max_results=wanted,
+                                          backend=engines, **kwargs)
     except Exception as e:
         # ddgs raises when an engine returns nothing, which is usually a block
         log.warning("Error searching %s for %r: %s", backend, query, e)
         await _warn(ctx, notes, f"{backend} returned no results for {query!r} ({e})")
         return []
+    kept = [r for r in results if domain_ok(r.get("href") or "", include, exclude)]
+    if results and not kept:
+        await _warn(ctx, notes, f"{backend} found results for {query!r}, but none on the allowed domains")
+    return kept[:max_results]
 
 async def _fetch(ctx: Context, results: List[Dict], include_urls: bool):
     """Fetch pages best first within MAX_CHARS. Returns (content, skipped)."""
@@ -113,20 +156,22 @@ async def _fetch(ctx: Context, results: List[Dict], include_urls: bool):
             page.pop("url")
     return content, skipped
 
-async def _rag_search(ctx: Context, query: str, backend: str, num_results: int, top_k: int, include_urls: bool) -> Dict:
+async def _rag_search(ctx: Context, query: str, backend: str, num_results: int, top_k: int, include_urls: bool,
+                      opts: Dict | None = None) -> Dict:
     from mcpsurfr.utils.tools import sort_by_score
 
-    notes = []
+    opts = opts or _filters()
+    notes = await _start(ctx, opts)
     if backend not in BACKENDS:
         await _warn(ctx, notes, f"Unknown backend {backend!r}, used auto. Available: {', '.join(BACKENDS)}")
         backend = "auto"
     result = {"backend": backend}
     await ctx.report_progress(0, 3, f"Searching {backend} for {query!r}")
-    results = await _search(ctx, notes, query, backend, num_results)
+    results = await _search(ctx, notes, query, backend, num_results, opts)
     if not results and backend != "auto":
         await _warn(ctx, notes, f"Retried {query!r} with auto, since {backend} returned nothing")
         result.update(backend="auto", fallback=True)
-        results = await _search(ctx, notes, query, "auto", num_results)
+        results = await _search(ctx, notes, query, "auto", num_results, opts)
     if not results:
         return _extras(dict(result, content=[]), notes, [])
 
@@ -141,7 +186,8 @@ async def _rag_search(ctx: Context, query: str, backend: str, num_results: int, 
 
 @mcp.tool(title="Web search", annotations=_READ_ONLY, icons=[_ICON])
 async def rag_search_ddgs(ctx: Context, query: str, num_results:int=10, top_k:int=5, include_urls:bool=True,
-                          backend: str = "auto") -> Dict:
+                          backend: str = "auto", recency: Recency | None = None, region: str | None = None,
+                          include_domains: List[str] | None = None, exclude_domains: List[str] | None = None) -> Dict:
     """
     Search the web and return the most relevant pages as text, for when whole pages are
     wanted (search returns only the relevant passages). Results are re-ranked locally by
@@ -160,6 +206,11 @@ async def rag_search_ddgs(ctx: Context, query: str, num_results:int=10, top_k:in
         backend (str): Search backend, same names as deep_research. Default "auto" (ddgs
                        metasearch over several engines, skipping blocked ones). Non-auto
                        backends that return nothing are retried with "auto".
+        recency (str | None): Only results from the past "day", "week", "month" or "year".
+        region (str | None): Region-language code like "us-en", "uk-en" or "de-de". Default: ddgs's own (us-en).
+        include_domains (List[str] | None): Only results from these sites, subdomains included.
+            Example: ["python.org", "stackoverflow.com"]
+        exclude_domains (List[str] | None): Never results from these sites. Example: ["pinterest.com"]
 
     Returns:
         Dict: {"backend", "content": [{"type": "text", "text", "url"}, ...]} ordered by relevance,
@@ -168,7 +219,8 @@ async def rag_search_ddgs(ctx: Context, query: str, num_results:int=10, top_k:in
               have "truncated": true and their full "chars". Also "skipped": [{"url", "reason"}]
               for pages left out, and "warnings" when an engine failed.
     """
-    return await _rag_search(ctx, query, backend, num_results, top_k, include_urls)
+    opts = _filters(recency, region, include_domains, exclude_domains)
+    return await _rag_search(ctx, query, backend, num_results, top_k, include_urls, opts)
 
 @_legacy_tool(title="Google search", annotations=_READ_ONLY, icons=[_ICON])
 async def rag_search_google(ctx: Context, query: str, num_results:int=10, top_k:int=5, include_urls:bool=True) -> Dict:
@@ -220,6 +272,10 @@ async def search(
     top_pages: int = 5,
     max_passages: int = 8,
     backend: str = "auto",
+    recency: Recency | None = None,
+    region: str | None = None,
+    include_domains: List[str] | None = None,
+    exclude_domains: List[str] | None = None,
 ) -> Dict | InputRequiredResult:
     """
     Search the web and return only the passages that answer the query, not whole
@@ -243,6 +299,11 @@ async def search(
         top_pages (int): Pages to fetch and split. Default 5.
         max_passages (int): Passages to return. Default 8.
         backend (str): Search backend, same names as deep_research. Default "auto".
+        recency (str | None): Only results from the past "day", "week", "month" or "year".
+        region (str | None): Region-language code like "us-en", "uk-en" or "de-de". Default: ddgs's own (us-en).
+        include_domains (List[str] | None): Only results from these sites, subdomains included.
+            Example: ["python.org", "stackoverflow.com"]
+        exclude_domains (List[str] | None): Never results from these sites. Example: ["pinterest.com"]
 
     Returns:
         Dict with "passages": [{"url", "heading", "text", "matched"}, ...] best first, and
@@ -253,8 +314,10 @@ async def search(
         If the user asked for full pages: "content": [{"type", "text", "url"}, ...] instead.
     """
     keywords = keywords or []
-    key = (query, tuple(keywords), num_results, top_pages, max_passages, backend)
-    found = _recent.get(key) or await _find_passages(ctx, *key[:1], keywords, *key[2:])
+    key = (query, tuple(keywords), num_results, top_pages, max_passages, backend,
+           recency, region, tuple(include_domains or []), tuple(exclude_domains or []))
+    found = _recent.get(key) or await _find_passages(ctx, query, keywords, num_results, top_pages, max_passages,
+                                                     backend, _filters(recency, region, include_domains, exclude_domains))
     _recent[key] = found
     _recent.move_to_end(key)
     while len(_recent) > 8:
@@ -301,21 +364,21 @@ async def search(
     return {"query": query, "content": fit_budget(pages, MAX_CHARS)}
 
 async def _find_passages(ctx: Context, query: str, keywords: List[str], num_results: int,
-                         top_pages: int, max_passages: int, backend: str) -> Dict:
+                         top_pages: int, max_passages: int, backend: str, opts: Dict) -> Dict:
     from mcpsurfr.utils.fetch import fetch_all_blocks
     from mcpsurfr.utils.passages import build_passages, keyword_scores, select, tokens
 
-    notes = []
+    notes = await _start(ctx, opts)
     empty = {"query": query, "passages": [], "tier": None, "pages_fetched": 0, "passages_considered": 0,
              "pages": {}, "skipped": [], "warnings": notes, "keywords_missing": False}
     if backend not in BACKENDS:
         await _warn(ctx, notes, f"Unknown backend {backend!r}, used auto. Available: {', '.join(BACKENDS)}")
         backend = "auto"
     await ctx.report_progress(0, 4, f"Searching {backend} for {query!r}")
-    results = await _search(ctx, notes, query, backend, num_results)
+    results = await _search(ctx, notes, query, backend, num_results, opts)
     if not results and backend != "auto":
         await _warn(ctx, notes, f"Retried {query!r} with auto, since {backend} returned nothing")
-        results = await _search(ctx, notes, query, "auto", num_results)
+        results = await _search(ctx, notes, query, "auto", num_results, opts)
     results = [r for r in results if r.get("href")]
     if not results:
         return empty
@@ -362,7 +425,8 @@ def _embedder():
     from mcpsurfr.utils.fetch import fetch_embedder, get_path_str
     return fetch_embedder(get_path_str(files('mcpsurfr.embedder').joinpath('embedder.tflite')))
 
-async def _deep_research_internal(ctx: Context, search_terms:List[str], backends:List[str], num_results_per_term:int=5,top_k_per_term:int=3, include_urls:bool=True)->Dict:
+async def _deep_research_internal(ctx: Context, search_terms:List[str], backends:List[str], num_results_per_term:int=5,top_k_per_term:int=3, include_urls:bool=True,
+                                  opts: Dict | None = None)->Dict:
     """
     Internal function to perform deep research across multiple search term with the given backend engine in ddgs.
 
@@ -378,7 +442,8 @@ async def _deep_research_internal(ctx: Context, search_terms:List[str], backends
     """
     from mcpsurfr.utils.tools import sort_by_score
 
-    notes, fallback = [], None
+    opts = opts or _filters()
+    notes, fallback = await _start(ctx, opts), None
     # ddgs would silently swap an unknown name for "auto", so say so instead
     unknown = [b for b in backends if b not in BACKENDS]
     if unknown:
@@ -396,7 +461,7 @@ async def _deep_research_internal(ctx: Context, search_terms:List[str], backends
     async def ranked(term: str, backend: str) -> List[Dict]:
         nonlocal done
         async with sem:
-            results = await _search(ctx, notes, term, backend, num_results_per_term)
+            results = await _search(ctx, notes, term, backend, num_results_per_term, opts)
         top = sort_by_score(await asyncio.to_thread(add_score_to_dict, term, results))[:top_k_per_term] if results else []
         search_summary[term][backend] = len(top)
         done += 1
@@ -449,7 +514,11 @@ async def deep_research(
     backends: List[str] | None = None,
     num_results_per_term: int = 10,
     top_k_per_term: int = 3,
-    include_urls: bool = True
+    include_urls: bool = True,
+    recency: Recency | None = None,
+    region: str | None = None,
+    include_domains: List[str] | None = None,
+    exclude_domains: List[str] | None = None,
 ) -> Dict:
     """
     Research a topic across several search terms and engines. Each term is searched on
@@ -470,6 +539,11 @@ async def deep_research(
         num_results_per_term (int): Number of results to rank per search term per backend.
         top_k_per_term (int): Number of top-ranked results to keep per search term per backend.
         include_urls (bool): Whether to include each page's source URL.
+        recency (str | None): Applied to every term. Only results from the past "day", "week", "month" or "year".
+        region (str | None): Region-language code like "us-en", "uk-en" or "de-de". Default: ddgs's own (us-en).
+        include_domains (List[str] | None): Only results from these sites, subdomains included.
+            Example: ["python.org", "stackoverflow.com"]
+        exclude_domains (List[str] | None): Never results from these sites. Example: ["pinterest.com"]
 
     Returns:
         Dict with search_terms, backends ("fallback": "auto" if they all came back empty),
@@ -489,7 +563,8 @@ async def deep_research(
         backends=backends,
         num_results_per_term=num_results_per_term,
         top_k_per_term=top_k_per_term,
-        include_urls=include_urls
+        include_urls=include_urls,
+        opts=_filters(recency, region, include_domains, exclude_domains),
     )
 
 
