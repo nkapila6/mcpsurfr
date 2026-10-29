@@ -7,12 +7,12 @@
     "url": "https://github.com/nkapila6/mcpsurfr",
     "source": "github"
   },
-  "version": "1.2.2",
+  "version": "1.2.3",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "mcpsurfr",
-      "version": "1.2.2",
+      "version": "1.2.3",
       "transport": {
         "type": "stdio"
       },
@@ -27,7 +27,7 @@
     },
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/nkapila6/mcpsurfr:v1.2.2",
+      "identifier": "ghcr.io/nkapila6/mcpsurfr:v1.2.3",
       "transport": {
         "type": "stdio"
       },
