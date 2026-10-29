@@ -81,6 +81,8 @@ PDF links are read like pages, first 50 pages only. Passages from them have a `h
 
 The search tools list pages they couldn't use in `skipped: [{url, reason}]`: `HTTP 403`, `timed out`, `couldn't connect`, `not a web page` (images, archives...), `scanned PDF (no text layer)`, `PDF too large`, `unreadable PDF`, `no readable content` (nav only or JavaScript-rendered), or `near-duplicate of <url>` (the same text at another address). Fewer pages than asked for is normal.
 
+A page that's gone (404, 410, dead domain, timed out) is read from the Wayback Machine's closest snapshot instead. Those pages and passages carry `archived` (the snapshot date) and `archive_url`: say the content is from an archived copy of that date, and cite both. Blocked pages (403, 429) never go to the archive.
+
 For each skipped page the search engine gave a snippet for, `snippets: [{url, title, text}]` holds it. That's how Reddit threads (behind a login) and msn.com news (rendered by JavaScript) still show up. A snippet is a short excerpt, not the page: use it for leads, quote it as the search snippet, and if the page itself mattered, say you couldn't read it rather than guessing the rest.
 
 ## Using results
