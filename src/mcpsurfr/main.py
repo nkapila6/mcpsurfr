@@ -47,7 +47,16 @@ _ICON = Icon(
 # these tools only read the web, so clients can treat them as safe to call
 _READ_ONLY = ToolAnnotations(read_only_hint=True, open_world_hint=True)
 
-mcp = FastMCP("mcpsurfr", instructions=INSTRUCTIONS, website_url="https://github.com/nkapila6/mcpsurfr", icons=[_ICON])
+def _version() -> str | None:
+    # without this the server reports fastmcp's own version to clients
+    from importlib.metadata import PackageNotFoundError, version
+    try:
+        return version("mcpsurfr")
+    except PackageNotFoundError:
+        return None
+
+mcp = FastMCP("mcpsurfr", instructions=INSTRUCTIONS, version=_version(),
+              website_url="https://github.com/nkapila6/mcpsurfr", icons=[_ICON])
 # serves the bundled skill as resources, so clients don't have to install it by hand
 mcp.add_provider(SkillsDirectoryProvider(roots=_HERE / "skills"))
 log = logging.getLogger(__name__)
