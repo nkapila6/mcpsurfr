@@ -25,7 +25,7 @@ What's in it:
 - **Ranked locally.** A small MobileBERT model on plain numpy re-ranks results, so only the best pages get fetched.
 - **Clean text.** Pages are fetched with browser impersonation, and only the main content is kept: no menus, cookie banners or footers. Code blocks and tables keep their lines. PDFs are read too (text layer, first 50 pages). The same page under two URLs comes back once.
 - **Passages instead of pages.** `search` returns just the paragraphs that answer the question, about a tenth of the tokens. When nothing matches well, it can ask you whether you want the full pages instead.
-- **Says what it left out.** Results list skipped pages with a reason (blocked, PDF, duplicate...), cut pages are marked `truncated`, and fallbacks and engine failures show up as `warnings`. Google blocks often, so it falls back to `auto` on its own.
+- **Says what it left out.** Results list skipped pages with a reason (blocked, JavaScript-only, duplicate...), cut pages are marked `truncated`, and fallbacks and engine failures show up as `warnings`. Google blocks often, so it falls back to `auto` on its own.
 - **Brings its own guide.** It serves a skill and a `research` prompt, so clients pick up how to use it without setup.
 
 | Tool | Use it for |
@@ -35,11 +35,21 @@ What's in it:
 | `deep_research` | Several search terms across backends, merged and de-duplicated |
 | `read_url` | One page you already have the link for. Pass a `query` to get only the passages that answer it |
 
-Every tool also takes `recency` (`day`, `week`, `month`, `year`), `region` (`uk-en`, `de-de`...), `include_domains` / `exclude_domains`, and `news: true` for dated news articles.
+The search tools also take `recency` (`day`, `week`, `month`, `year`), `region` (`uk-en`, `de-de`...), `include_domains` / `exclude_domains`, and `news: true` for dated news articles.
 
 The old `rag_search_google`, `deep_research_ddgs` and `deep_research_google` presets are hidden, since every tool costs context in every chat. Set `MCPSURFR_LEGACY_TOOLS=1` if a prompt of yours still names them.
 
 Backends: `auto` (default), `brave`, `duckduckgo`, `google`, `grokipedia`, `mojeek`, `startpage`, `wikipedia`, `yahoo`. `auto` and `brave` are the dependable ones.
+
+## How it compares
+
+The other keyless options (the SearXNG and DuckDuckGo MCP servers, open-webSearch, the official fetch server) hand the model snippets or whole pages. Hosted APIs like Tavily, Exa and Brave do cut pages down to the useful parts, but they need a key and do it on their servers. mcpsurfr does that part on your machine:
+
+- picks passages with BM25 on keywords the model supplies, with an on-device embedder as backup
+- drops near-duplicate pages and shares one text budget across the rest
+- tells the model what it skipped and why, and asks you before falling back to full pages
+
+What it doesn't do: JavaScript-only pages, OCR for scanned PDFs, image search.
 
 ## Install
 
