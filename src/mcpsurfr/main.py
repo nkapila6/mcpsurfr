@@ -371,34 +371,36 @@ async def _deep_research_internal(ctx: Context, search_terms:List[str], backends
     backends = [b for b in backends if b in BACKENDS] or ["auto"]
 
     all_results = []
-    search_summary = {}
-    total = len(search_terms) * len(backends) + 1
-    step = 0
+    search_summary = {term: {backend: 0 for backend in backends} for term in search_terms}
+    step = len(search_terms) * len(backends)
+    total = step + 1
+    done = 0
+    # each ddgs call already fans out to ~2 engines, so 3 at once is ~6 requests in flight
+    sem = asyncio.Semaphore(3)
 
-    # search each term on all specified backends
-    for term in search_terms:
-        search_summary[term] = {backend: 0 for backend in backends}
-
-        for backend in backends:
-            await ctx.report_progress(step, total, f"Searching {backend} for {term!r}")
-            step += 1
+    async def ranked(term: str, backend: str) -> List[Dict]:
+        nonlocal done
+        async with sem:
             results = await _search(ctx, notes, term, backend, num_results_per_term)
-            if results:
-                scored_results = sort_by_score(await asyncio.to_thread(add_score_to_dict, term, results))
-                top_results = scored_results[0:top_k_per_term]
-                all_results.extend(top_results)
-                search_summary[term][backend] = len(top_results)
+        top = sort_by_score(await asyncio.to_thread(add_score_to_dict, term, results))[:top_k_per_term] if results else []
+        search_summary[term][backend] = len(top)
+        done += 1
+        await ctx.report_progress(min(done, step), total, f"Searched {backend} for {term!r}")
+        return top
+
+    # gather keeps task order, so results stay grouped by term like the old loop did
+    async def search_all(pairs) -> None:
+        for top in await asyncio.gather(*(ranked(t, b) for t, b in pairs)):
+            all_results.extend(top)
+
+    await ctx.report_progress(0, total, f"Searching {len(search_terms)} terms on {', '.join(backends)}")
+    await search_all([(t, b) for t in search_terms for b in backends])
 
     # every chosen engine came back empty (Google blocking, usually): fall back to auto
     if not all_results and backends != ["auto"]:
         await _warn(ctx, notes, f"{', '.join(backends)} returned nothing, retried every term with auto")
         fallback = "auto"
-        for term in search_terms:
-            results = await _search(ctx, notes, term, "auto", num_results_per_term)
-            if results:
-                scored_results = sort_by_score(await asyncio.to_thread(add_score_to_dict, term, results))
-                all_results.extend(scored_results[0:top_k_per_term])
-                search_summary[term]["auto"] = len(scored_results[0:top_k_per_term])
+        await search_all([(t, "auto") for t in search_terms])
 
     # remove duplicates and keep high scores
     seen_urls = {}
