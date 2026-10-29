@@ -66,7 +66,9 @@ def build_passages(url: str, blocks: List[Tuple[str, str]]) -> List[Dict]:
         if buf and len(buf) >= MIN_PASSAGE_CHARS and (heading != cur_heading or full):
             emit(cur_heading, buf.strip())
             buf = ""
-        if not buf:
+        # a short leftover carried into the next section takes that section's heading:
+        # the passage is mostly the new section, and the old heading would mislabel it
+        if not buf or heading != cur_heading:
             cur_heading = heading
         buf += text + " "
     if buf.strip():
