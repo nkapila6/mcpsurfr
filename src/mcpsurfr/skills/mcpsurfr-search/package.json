@@ -1,6 +1,6 @@
 {
   "name": "@mcpsurfr/mcpsurfr-search",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "AgentSkill for efficiently using mcpsurfr web search with semantic similarity ranking",
   "type": "agentskill",
   "keywords": [

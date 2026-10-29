@@ -1,6 +1,6 @@
 [project]
 name = "mcpsurfr"
-version = "1.2.0"
+version = "1.2.1"
 authors = [{ name = "Nikhil Kapila", email = "info@nkapila.me" }]
 description = "MCP \"server\" that can perform a web search locally without the use of APIs."
 readme = "README.md"
