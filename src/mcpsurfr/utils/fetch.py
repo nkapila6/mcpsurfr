@@ -17,6 +17,7 @@ import primp
 from importlib.resources import as_file
 
 from .adapters import site_doc
+from . import docsmd
 from .cache import TTLCache
 from .extract import extract_blocks, extract_main_text, page_meta, url_date
 from .pdf import pdf_blocks
@@ -121,6 +122,11 @@ def _fetch_doc(url: str, timeout: int) -> Dict:
     doc = site_doc(url, _client(), timeout)
     if doc:
         return doc
+    # a docs host already known to publish markdown copies: skip its HTML
+    if docsmd.known_host(url) and docsmd.md_url(url):
+        doc = docsmd.fetch(_client(), docsmd.md_url(url), url, timeout)
+        if doc:
+            return doc
     response, reason = _get(url, timeout)
     if response is None:
         return {"url": url, "reason": reason}
@@ -129,9 +135,16 @@ def _fetch_doc(url: str, timeout: int) -> Dict:
         if not blocks:
             return {"url": url, "reason": reason}
         return {"url": url, "blocks": blocks, "text": "\n".join(f"[{page}] {text}" for page, text in blocks)}
+    html = _is_html(response)
+    md = docsmd.from_html(response.text, url) if html else None
+    if md:
+        doc = docsmd.fetch(_client(), md, url, timeout)
+        docsmd.remember(url, doc is not None)
+        if doc:
+            # the HTML still knows the publish date, and often a better title
+            return doc | page_meta(response.text)
     # primp decodes the charset (header or <meta>); extraction drops nav menus,
     # banners and footers. primp's own html->text is the fallback.
-    html = _is_html(response)
     text = (extract_main_text(response.text) if html else None) or _plain(response)
     blocks = extract_blocks(response.text) if html else []
     text_ok = _readable(text)

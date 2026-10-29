@@ -69,6 +69,10 @@ Stack Overflow and other Stack Exchange questions, Wikipedia articles and GitHub
 
 If you also see `rag_search_google`, `deep_research_ddgs` or `deep_research_google`, they're the main tools with a fixed backend. Prefer the main tools with `backend`.
 
+## Docs sites
+
+Docs sites that publish markdown copies of their pages (Mintlify, MkDocs, VitePress and similar) are read from those copies, so headings and code come through cleanly. Many also have an index of every page at `/llms.txt`: `read_url` on `https://<site>/llms.txt` with a `query` finds the right page to read next.
+
 ## PDFs
 
 PDF links are read like pages, first 50 pages only. Passages from them have a `heading` like `Page 4`, so cite the page along with the URL.
