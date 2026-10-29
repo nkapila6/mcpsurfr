@@ -5,18 +5,12 @@ Local web search for your LLM over MCP. No API keys, and results are ranked on y
 [![Add MCP Server mcpsurfr to LM Studio](https://files.lmstudio.ai/deeplink/mcp-install-light.svg)](https://lmstudio.ai/install-mcp?name=mcpsurfr&config=eyJjb21tYW5kIjoidXZ4IiwiYXJncyI6WyItLWZyb20iLCJnaXQraHR0cHM6Ly9naXRodWIuY29tL25rYXBpbGE2L21jcHN1cmZyIiwibWNwc3VyZnIiXX0%3D) [![Ask DeepWiki](https://img.shields.io/badge/Ask-DeepWiki-3b6fe0)](https://deepwiki.com/nkapila6/mcpsurfr) [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/X8X51MK4A1)
 
 ```mermaid
-%%{init: {'theme': 'base'}}%%
-flowchart TD
-    A[LLM] -->|query| S["Search with ddgs (auto: several engines, no keys)"]
-    S -->|"rag_search, deep_research"| R["Re-rank results locally (MobileBERT on numpy)"]
-    R --> P[Fetch top pages, keep the main content]
-    P -->|page text + URLs| A
-    S -->|search| T1["Tier 1: pick pages by their snippets"]
-    T1 --> T2["Tier 2: split into passages, keyword match (BM25)"]
-    T2 -->|few hits| OUT["Best passages + URLs (about 800 tokens)"]
-    T2 -->|too many or none| T3[Tier 3: rank them by meaning]
-    T3 --> OUT
-    OUT --> A
+flowchart LR
+    Q["query + keywords"] --> S["ddgs<br>several engines, no keys"]
+    S --> R["re-rank<br>on device"]
+    R --> F["fetch top pages<br>main text, PDFs"]
+    F -->|search| P["best passages<br>~1k tokens"]
+    F -->|rag_search_ddgs<br>deep_research| W["full pages<br>shared budget"]
 ```
 
 What's in it:
@@ -37,17 +31,17 @@ What's in it:
 
 The search tools also take `recency` (`day`, `week`, `month`, `year`), `region` (`uk-en`, `de-de`...), `include_domains` / `exclude_domains`, and `news: true` for dated news articles.
 
-The old `rag_search_google`, `deep_research_ddgs` and `deep_research_google` presets are hidden, since every tool costs context in every chat. Turn them back on with `MCPSURFR_LEGACY_TOOLS` (see [Options](#options)) if a prompt of yours still names them.
+The old `rag_search_google`, `deep_research_ddgs` and `deep_research_google` presets are hidden by default. [Options](#options) says why and how to turn them back on.
 
-Backends: `auto` (default), `brave`, `duckduckgo`, `google`, `grokipedia`, `mojeek`, `startpage`, `wikipedia`, `yahoo`. `auto` and `brave` are the dependable ones.
+Backends: `auto` (default), `brave`, `duckduckgo`, `google`, `grokipedia`, `mojeek`, `startpage`, `wikipedia`, `yahoo`. `auto` and `brave` are the dependable ones. With `news: true`: `auto`, `bing`, `duckduckgo`, `yahoo`.
 
 ## How it compares
 
-The other keyless options (the SearXNG and DuckDuckGo MCP servers, open-webSearch, the official fetch server) hand the model snippets or whole pages. Hosted APIs like Tavily, Exa and Brave do cut pages down to the useful parts, but they need a key and do it on their servers. mcpsurfr does that part on your machine:
+Other keyless MCP servers ([mcp-searxng](https://github.com/ihor-sokoliuk/mcp-searxng), [duckduckgo-mcp-server](https://github.com/nickclyde/duckduckgo-mcp-server), [open-webSearch](https://github.com/Aas-ee/open-webSearch), the official [fetch](https://github.com/modelcontextprotocol/servers/tree/main/src/fetch) server) hand the model snippets or whole pages. Hosted APIs like Tavily, Exa and Brave do cut pages down to the useful parts, but they need a key and do it on their servers. mcpsurfr does that part on your machine:
 
-- picks passages with BM25 on keywords the model supplies, with an on-device embedder as backup
+- picks passages with BM25 on the query plus keywords the model supplies, and an on-device embedder for ties and paraphrases
 - drops near-duplicate pages and shares one text budget across the rest
-- tells the model what it skipped and why, and asks you before falling back to full pages
+- tells the model what it skipped and why, and can ask you before falling back to full pages
 
 What it doesn't do: JavaScript-only pages, OCR for scanned PDFs, image search.
 
@@ -100,7 +94,7 @@ Both are optional, set through `env`:
 
 | Variable | Default | What it does |
 |---|---|---|
-| `MCPSURFR_MAX_CHARS` | `40000` | Text budget per call for the full-page tools, shared across pages (~4 chars per token) |
+| `MCPSURFR_MAX_CHARS` | `40000` | Text budget per call when returning full pages (`rag_search_ddgs`, `deep_research`, `read_url` without a query), shared across pages. ~4 chars per token |
 | `MCPSURFR_LEGACY_TOOLS` | off | `1` brings back `rag_search_google`, `deep_research_ddgs` and `deep_research_google` |
 
 Why the legacy tools are off: they're just `rag_search_ddgs` and `deep_research` with a fixed `backend`, which the search tools now take themselves. Each tool's name, description and parameters get sent to the model in every chat whether it's used or not, so three duplicates cost context for nothing and give the model more ways to pick the wrong one. Turn them on only if a prompt or workflow of yours calls them by name.
@@ -109,7 +103,7 @@ With Docker, `env` only reaches the `docker` command, so pass each one into the 
 
 Not sure where your config lives? See the [MCP quickstart](https://modelcontextprotocol.io/quickstart/user). Tested with Claude Desktop, Claude Code, Cursor and Goose.
 
-**Coming from `mcp-local-rag`?** Your old config keeps working, since the old URL redirects and the `mcp-local-rag` command still exists. Switching to the config above gets you the new name and drops the `--python=3.10` pin (3.10 is end of life as of October 2026).
+**Coming from `mcp-local-rag`?** Your old config keeps working, since the old URL redirects and the `mcp-local-rag` command still exists. Switching to the config above gets you the new name and drops the `--python=3.10` pin (3.10 is end of life as of October 2026). If your prompts call `rag_search_google` or `deep_research_google` by name, set `MCPSURFR_LEGACY_TOOLS=1`.
 
 ## Skill and prompt
 
