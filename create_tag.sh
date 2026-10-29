@@ -56,13 +56,19 @@ new_js = re.sub(r'("version":\s*)"[^"]*"', rf'\g<1>"{version}"', js, count=1)
 assert json.loads(new_js)["version"] == version
 changes.append((package_json, cur, new_js))
 
-# server.json has the version twice: the server's, and the image tag the registry points at
+# server.json has the version three times: the server's, the PyPI package's,
+# and the image tag the registry points at
 sv = open(server_json).read()
 cur = json.loads(sv)["version"]
-new_sv = re.sub(r'("version":\s*)"[^"]*"', rf'\g<1>"{version}"', sv, count=1)
+new_sv = re.sub(r'("version":\s*)"[^"]*"', rf'\g<1>"{version}"', sv)
 new_sv = re.sub(r'("identifier":\s*"ghcr\.io/[^":]+:)v[^"]*"', rf'\g<1>v{version}"', new_sv)
 d = json.loads(new_sv)
-assert d["version"] == version and d["packages"][0]["identifier"].endswith(f":v{version}")
+assert d["version"] == version
+for pkg in d["packages"]:
+    if pkg["registryType"] == "oci":
+        assert pkg["identifier"].endswith(f":v{version}")
+    else:
+        assert pkg["version"] == version
 changes.append((server_json, cur, new_sv))
 
 for path, cur, new in changes:

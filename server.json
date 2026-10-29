@@ -10,6 +10,22 @@
   "version": "1.2.0",
   "packages": [
     {
+      "registryType": "pypi",
+      "identifier": "mcpsurfr",
+      "version": "1.2.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "MCPSURFR_MAX_CHARS",
+          "description": "Text budget per call for the full-page tools, shared across pages (~4 chars per token).",
+          "format": "number",
+          "default": "40000"
+        }
+      ]
+    },
+    {
       "registryType": "oci",
       "identifier": "ghcr.io/nkapila6/mcpsurfr:v1.2.0",
       "transport": {
@@ -21,12 +37,6 @@
           "description": "Text budget per call for the full-page tools, shared across pages (~4 chars per token).",
           "format": "number",
           "default": "40000"
-        },
-        {
-          "name": "MCPSURFR_LEGACY_TOOLS",
-          "description": "Set to true to also register the old rag_search_google, deep_research_ddgs and deep_research_google presets.",
-          "format": "boolean",
-          "default": "false"
         }
       ]
     }
