@@ -31,7 +31,8 @@ Local web search with on-device re-ranking, no API keys.
 - rag_search_ddgs: full pages as text, for when the user wants whole pages. Takes a `backend`.
 - read_url: one page you already have the link for (HTML or PDF). Pass a query to get only
   the passages that answer it.
-- deep_research: broader topics. Give it 2-5 specific, related search_terms. Default backend is "auto".
+- deep_research: broader topics. Give it 2-5 specific, related search_terms. Pass passages=true to
+  get only the relevant passages per term instead of full pages.
 - Every search tool takes recency ("day", "week", "month", "year"), region ("uk-en"),
   include_domains / exclude_domains, and news=true for news articles with dates.
 - Google often blocks scrapers. When it returns nothing, the server retries with "auto" and says so.
@@ -80,6 +81,16 @@ def _budget() -> int:
         return 40000
 
 MAX_CHARS = _budget()
+
+def _deep_mode() -> bool:
+    """True when deep_research should return passages unless a call says otherwise.
+    MCPSURFR_DEEP_RESEARCH_MODE is "pages" (the default) or "passages"."""
+    raw = os.environ.get("MCPSURFR_DEEP_RESEARCH_MODE", "").strip().lower()
+    if raw not in ("", "pages", "passages"):
+        log.warning("MCPSURFR_DEEP_RESEARCH_MODE=%r isn't pages or passages, using pages", raw)
+    return raw == "passages"
+
+DEEP_PASSAGES = _deep_mode()
 
 def add_score_to_dict(query: str, results: List[Dict]) -> List[Dict]:
     """Add similarity scores to search results."""
@@ -539,7 +550,7 @@ async def read_url(ctx: Context, url: str, query: str | None = None, keywords: L
     return result
 
 async def _deep_research_internal(ctx: Context, search_terms:List[str], backends:List[str], num_results_per_term:int=5,top_k_per_term:int=3, include_urls:bool=True,
-                                  opts: Dict | None = None)->Dict:
+                                  opts: Dict | None = None, passages: bool | None = None, max_passages: int = 12)->Dict:
     """
     Internal function to perform deep research across multiple search term with the given backend engine in ddgs.
 
@@ -610,16 +621,43 @@ async def _deep_research_internal(ctx: Context, search_terms:List[str], backends
                 seen_urls[url] = result
                 unique_results.append(result)
 
-    # fetch content from final list of results
-    await ctx.report_progress(step, total, f"Fetching {len(unique_results)} pages")
-    content, skipped = await _fetch(ctx, unique_results, include_urls)
-    await ctx.report_progress(total, total, "Done")
-
     result = {"search_terms": search_terms, "backends": backends}
     if fallback:
         result["fallback"] = fallback
     result.update(search_summary=search_summary, total_unique_results=len(unique_results))
+
+    await ctx.report_progress(step, total, f"Fetching {len(unique_results)} pages")
+    if DEEP_PASSAGES if passages is None else passages:
+        from mcpsurfr.utils.fetch import fetch_all_blocks
+        urls = [r["href"] for r in unique_results]
+        pages, skipped, meta = await asyncio.to_thread(fetch_all_blocks, urls)
+        picked, tiers = await _passages_per_term(search_terms, urls, pages, max_passages)
+        _add_meta(picked, unique_results, meta)
+        await ctx.report_progress(total, total, "Done")
+        result.update(pages_fetched=len(pages), tiers=tiers)
+        return _extras(result, notes, skipped) | {"passages": picked}
+
+    content, skipped = await _fetch(ctx, unique_results, include_urls)
+    await ctx.report_progress(total, total, "Done")
     return _extras(result, notes, skipped) | {"content": content}
+
+async def _passages_per_term(terms: List[str], urls: List[str], pages: Dict, max_passages: int):
+    """Rank passages for each term on its own, so every angle of the research gets covered,
+    then interleave them best first. Returns (passages, {term: tier})."""
+    per = max(2, -(-max_passages // max(1, len(terms))))
+    picks, tiers = [], {}
+    for term in terms:
+        chosen, tiers[term], _ = await _pick_passages(term, [], urls, pages, per)
+        picks.append([dict(p, term=term) for p in chosen])
+    merged, seen = [], set()
+    for rank in range(per):
+        for chosen in picks:
+            if rank < len(chosen):
+                key = (chosen[rank]["url"], chosen[rank]["text"][:200])
+                if key not in seen:
+                    seen.add(key)
+                    merged.append(chosen[rank])
+    return merged[:max_passages], tiers
 
 @mcp.tool(title="Deep research", annotations=_READ_ONLY, icons=[_ICON])
 async def deep_research(
@@ -634,6 +672,8 @@ async def deep_research(
     include_domains: List[str] | None = None,
     exclude_domains: List[str] | None = None,
     news: bool = False,
+    passages: bool | None = None,
+    max_passages: int = 12,
 ) -> Dict:
     """
     Research a topic across several search terms and engines. Each term is searched on
@@ -661,9 +701,16 @@ async def deep_research(
         exclude_domains (List[str] | None): Never results from these sites. Example: ["pinterest.com"]
         news (bool): Search news articles instead of the web. Results then carry their published
             "date". News backends: auto, bing, duckduckgo, yahoo. Pair with recency for current events.
+        passages (bool | None): True returns only the passages that answer each term, about a
+            tenth of the text of full pages: prefer it unless whole pages are needed. False returns
+            full pages. Left out, the server's MCPSURFR_DEEP_RESEARCH_MODE decides (pages by default).
+        max_passages (int): Passages to return in passages mode, shared across terms. Default 12.
 
     Returns:
-        Dict with search_terms, backends ("fallback": "auto" if they all came back empty),
+        With passages: search_terms, backends, search_summary, "passages": [{"url", "title",
+        "date", "heading", "text", "matched", "term"}, ...] (each term's best first, interleaved),
+        "tiers" ({term: tier}, as in search), "skipped" and "warnings".
+        Otherwise: Dict with search_terms, backends ("fallback": "auto" if they all came back empty),
         search_summary (results kept per term and backend), total_unique_results, "skipped"
         (pages left out, with reasons), "warnings", and content: [{"type": "text", "text", "url"}, ...].
         All pages share one text budget (MCPSURFR_MAX_CHARS, default 40k chars), so more
@@ -682,6 +729,8 @@ async def deep_research(
         top_k_per_term=top_k_per_term,
         include_urls=include_urls,
         opts=_filters(recency, region, include_domains, exclude_domains, news),
+        passages=passages,
+        max_passages=max_passages,
     )
 
 
