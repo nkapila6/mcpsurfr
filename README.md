@@ -33,6 +33,7 @@ What's in it:
 | `search` | Start here: returns only the relevant passages. Pass `keywords` for better hits |
 | `rag_search_ddgs` | Full pages as text (the original mode). Takes a `backend` |
 | `deep_research` | Several search terms across backends, merged and de-duplicated |
+| `read_url` | One page you already have the link for. Pass a `query` to get only the passages that answer it |
 
 Every tool also takes `recency` (`day`, `week`, `month`, `year`), `region` (`uk-en`, `de-de`...), `include_domains` / `exclude_domains`, and `news: true` for dated news articles.
 

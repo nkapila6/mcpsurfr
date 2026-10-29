@@ -14,6 +14,7 @@ mcpsurfr searches the web through ddgs, ranks the results on-device, and fetches
 | Almost any question | `search` |
 | The user wants whole pages, or `search` came back thin | `rag_search_ddgs` |
 | A topic that needs several angles or sources | `deep_research` |
+| The user pasted a link, or you need more from one result | `read_url` (with a `query` for just the relevant passages) |
 | The user asks for a specific engine | any of the above with `backend` (or `backends`) |
 
 ## Filters (every tool)

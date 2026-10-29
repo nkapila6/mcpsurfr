@@ -7,6 +7,7 @@ Created on 2025-06-04 23:01:38 Wednesday
 """
 
 from typing import List, Dict
+import ipaddress
 from urllib.parse import urlparse
 
 def sort_by_score(results: List[Dict]) -> List[Dict]:
@@ -39,3 +40,19 @@ def site_query(query: str, include: List[str]) -> str:
         return query
     sites = " OR ".join(f"site:{d}" for d in include)
     return f"{query} {sites}" if len(include) == 1 else f"{query} ({sites})"
+
+def public_url(url: str) -> bool:
+    """http(s) and not obviously local. read_url takes URLs straight from the model, and a
+    page could talk it into reading a router admin page or a dev server otherwise. Names
+    that resolve to private IPs still get through: this catches the obvious cases only."""
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme not in ("http", "https") or not host:
+        return False
+    if host == "localhost" or host.endswith((".localhost", ".local", ".internal")):
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return True
+    return ip.is_global

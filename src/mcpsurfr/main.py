@@ -28,6 +28,8 @@ Local web search with on-device re-ranking, no API keys.
 - search: use this first. Returns only the passages that answer the query (about a tenth of the
   tokens of full pages). Pass `keywords` with terms and synonyms a good answer would contain.
 - rag_search_ddgs: full pages as text, for when the user wants whole pages. Takes a `backend`.
+- read_url: one page you already have the link for (HTML or PDF). Pass a query to get only
+  the passages that answer it.
 - deep_research: broader topics. Give it 2-5 specific, related search_terms. Default backend is "auto".
 - Every search tool takes recency ("day", "week", "month", "year"), region ("uk-en"),
   include_domains / exclude_domains, and news=true for news articles with dates.
@@ -398,7 +400,7 @@ async def search(
 async def _find_passages(ctx: Context, query: str, keywords: List[str], num_results: int,
                          top_pages: int, max_passages: int, backend: str, opts: Dict) -> Dict:
     from mcpsurfr.utils.fetch import fetch_all_blocks
-    from mcpsurfr.utils.passages import build_passages, keyword_scores, select, tokens
+    from mcpsurfr.utils.passages import keyword_scores, tokens
 
     notes = await _start(ctx, opts)
     empty = {"query": query, "passages": [], "tier": None, "pages_fetched": 0, "passages_considered": 0,
@@ -425,6 +427,18 @@ async def _find_passages(ctx: Context, query: str, keywords: List[str], num_resu
     pages, skipped = await asyncio.to_thread(fetch_all_blocks, urls)
     if skipped:
         await ctx.info(f"{len(skipped)} of {len(urls)} pages skipped (blocked, not a web page, empty or duplicate)")
+    await ctx.report_progress(3, 4, "Scoring passages")
+    chosen, tier, passages = await _pick_passages(query, keywords, urls, pages, max_passages)
+    _add_dates(chosen, results)
+    await ctx.report_progress(4, 4, "Done")
+    return {"query": query, "passages": chosen, "tier": tier, "pages_fetched": len(pages),
+            "passages_considered": len(passages), "pages": {u: pages[u] for u in urls if u in pages},
+            "skipped": skipped, "warnings": notes, "keywords_missing": _keywords_missing(keywords, passages, tokens)}
+
+async def _pick_passages(query: str, keywords: List[str], urls: List[str], pages: Dict, max_passages: int):
+    """Tiers 2 and 3: split pages into passages, keywords first, the embedder only if it's
+    needed. Returns (chosen, tier, every passage considered)."""
+    from mcpsurfr.utils.passages import build_passages, keyword_scores, select
     passages, seen = [], set()
     for url in urls:
         for p in build_passages(url, pages.get(url, [])):
@@ -433,17 +447,10 @@ async def _find_passages(ctx: Context, query: str, keywords: List[str], num_resu
             if key not in seen:
                 seen.add(key)
                 passages.append(p)
-
-    # tiers 2 and 3: keywords, then the embedder only if it's needed
-    await ctx.report_progress(3, 4, f"Scoring {len(passages)} passages")
     scores = keyword_scores(query, keywords, passages)
     embedder = await asyncio.to_thread(_embedder)
     chosen, tier = await asyncio.to_thread(select, query, keywords, passages, scores, max_passages, embedder.embed_batch)
-    _add_dates(chosen, results)
-    await ctx.report_progress(4, 4, "Done")
-    return {"query": query, "passages": chosen, "tier": tier, "pages_fetched": len(pages),
-            "passages_considered": len(passages), "pages": {u: pages[u] for u in urls if u in pages},
-            "skipped": skipped, "warnings": notes, "keywords_missing": _keywords_missing(keywords, passages, tokens)}
+    return chosen, tier, passages
 
 def _keywords_missing(keywords: List[str], passages: List[Dict], tokens) -> bool:
     wanted = {t for k in keywords for t in tokens(k)}
@@ -455,6 +462,45 @@ def _embedder():
     from importlib.resources import files
     from mcpsurfr.utils.fetch import fetch_embedder, get_path_str
     return fetch_embedder(get_path_str(files('mcpsurfr.embedder').joinpath('embedder.tflite')))
+
+@mcp.tool(title="Read a page", annotations=_READ_ONLY, icons=[_ICON])
+async def read_url(ctx: Context, url: str, query: str | None = None, keywords: List[str] | None = None,
+                   max_passages: int = 8) -> Dict:
+    """
+    Read one page whose URL you already have: a link the user pasted, or one from earlier
+    results. HTML or PDF. With a query, returns only the passages that answer it, the same
+    way search does; without one, the page's main text (cut to the shared budget).
+
+    Args:
+        url (str): A public http(s) URL. Localhost and private network addresses are refused.
+        query (str | None): What you want from the page. Leave out to get the whole text.
+        keywords (List[str] | None): Terms a good answer would contain, as for search.
+        max_passages (int): Passages to return when there's a query. Default 8.
+
+    Returns:
+        With a query: {"url", "passages": [{"url", "heading", "text", "matched"}], "tier"}, plus a
+        "note" when nothing matched the terms. Without: {"url", "content": [{"type", "text", "url"}]},
+        cut pages marked "truncated". {"url", "error"} when the page couldn't be read.
+    """
+    from mcpsurfr.utils.fetch import fetch_all_blocks, fetch_all_content
+    from mcpsurfr.utils.tools import public_url
+
+    if not public_url(url):
+        return {"url": url, "error": "only public http(s) URLs can be read"}
+    if not query:
+        content, skipped = await asyncio.to_thread(fetch_all_content, [url], MAX_CHARS)
+        return {"url": url, "content": content} if content else {"url": url, "error": skipped[0]["reason"]}
+
+    keywords = keywords or []
+    pages, skipped = await asyncio.to_thread(fetch_all_blocks, [url])
+    if not pages:
+        return {"url": url, "error": skipped[0]["reason"]}
+    chosen, tier, _ = await _pick_passages(query, keywords, [url], pages, max_passages)
+    result = {"url": url, "passages": chosen, "tier": tier}
+    if tier == "semantic":
+        result["note"] = ("Low confidence: no passage contains the query or keyword terms. Try other keywords, "
+                          "or call read_url without a query for the whole text.")
+    return result
 
 async def _deep_research_internal(ctx: Context, search_terms:List[str], backends:List[str], num_results_per_term:int=5,top_k_per_term:int=3, include_urls:bool=True,
                                   opts: Dict | None = None)->Dict:
