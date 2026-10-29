@@ -27,9 +27,10 @@ jobs:
           py=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
           js=$(python3 -c 'import json; print(json.load(open("src/mcpsurfr/skills/mcpsurfr-search/package.json"))["version"])')
           sv=$(python3 -c 'import json; print(json.load(open("server.json"))["version"])')
-          img=$(python3 -c 'import json; print(json.load(open("server.json"))["packages"][0]["identifier"].rsplit(":", 1)[1])')
-          echo "tag=$tag pyproject.toml=$py package.json=$js server.json=$sv image=$img"
-          if [ "$tag" != "$py" ] || [ "$tag" != "$js" ] || [ "$tag" != "$sv" ] || [ "v$tag" != "$img" ]; then
+          img=$(python3 -c 'import json; print(next(p for p in json.load(open("server.json"))["packages"] if p["registryType"] == "oci")["identifier"].rsplit(":", 1)[1])')
+          pypi=$(python3 -c 'import json; print(next(p for p in json.load(open("server.json"))["packages"] if p["registryType"] == "pypi")["version"])')
+          echo "tag=$tag pyproject.toml=$py package.json=$js server.json=$sv image=$img pypi=$pypi"
+          if [ "$tag" != "$py" ] || [ "$tag" != "$js" ] || [ "$tag" != "$sv" ] || [ "v$tag" != "$img" ] || [ "$tag" != "$pypi" ]; then
             echo "::error::tag v$tag doesn't match the versions in the repo. Release with ./create_tag.sh"
             exit 1
           fi
@@ -60,10 +61,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+  # Trusted publishing: PyPI trusts this workflow running in the "pypi" environment,
+  # so no API token is stored anywhere.
+  publish-pypi:
+    needs: check-version
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+      - run: uv build
+      - run: uv publish --trusted-publishing always
+
   # The registry pulls the image to check its io.modelcontextprotocol.server.name
-  # label (set in the Dockerfile), so this has to run after the push.
+  # label (set in the Dockerfile), and reads the PyPI README for its mcp-name line,
+  # so this has to run after both are up.
   publish-mcp-registry:
-    needs: publish-docker-image
+    needs: [publish-docker-image, publish-pypi]
     runs-on: ubuntu-latest
     permissions:
       contents: read
