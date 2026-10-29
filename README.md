@@ -1,10 +1,29 @@
-<p align="center"><img src="https://raw.githubusercontent.com/nkapila6/mcpsurfr/main/assets/logo.svg" alt="mcpsurfr" width="460"></p>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/nkapila6/mcpsurfr/main/assets/logo-dark.svg">
+    <img src="https://raw.githubusercontent.com/nkapila6/mcpsurfr/main/assets/logo-light.svg" alt="mcpsurfr" width="460">
+  </picture>
+</p>
 
 <!-- mcp-name: io.github.nkapila6/mcpsurfr -->
 
-Local web search for your LLM over MCP. No API keys, and results are ranked on your machine. _Formerly [`mcp-local-rag`](https://github.com/nkapila6/mcpsurfr/tree/main-bak)._
+<p align="center">Local web search for your LLM over MCP. No API keys, and results are ranked on your machine.<br><em>Formerly <a href="https://github.com/nkapila6/mcpsurfr/tree/main-bak"><code>mcp-local-rag</code></a>.</em></p>
 
-[![Add MCP Server mcpsurfr to LM Studio](https://files.lmstudio.ai/deeplink/mcp-install-light.svg)](https://lmstudio.ai/install-mcp?name=mcpsurfr&config=eyJjb21tYW5kIjoidXZ4IiwiYXJncyI6WyJtY3BzdXJmciJdfQ%3D%3D) [![Ask DeepWiki](https://img.shields.io/badge/Ask-DeepWiki-3b6fe0)](https://deepwiki.com/nkapila6/mcpsurfr) [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/X8X51MK4A1)
+<p align="center">
+  <a href="https://pypi.org/project/mcpsurfr/"><img src="https://img.shields.io/pypi/v/mcpsurfr" alt="PyPI"></a>
+  <a href="https://pypi.org/project/mcpsurfr/"><img src="https://img.shields.io/pypi/pyversions/mcpsurfr" alt="Python versions"></a>
+  <a href="https://github.com/nkapila6/mcpsurfr/pkgs/container/mcpsurfr"><img src="https://img.shields.io/badge/docker-ghcr.io-2496ED?logo=docker&logoColor=white" alt="Docker image"></a>
+  <a href="https://github.com/nkapila6/mcpsurfr/blob/main/LICENSE"><img src="https://img.shields.io/github/license/nkapila6/mcpsurfr" alt="MIT license"></a>
+  <a href="https://deepwiki.com/nkapila6/mcpsurfr"><img src="https://img.shields.io/badge/Ask-DeepWiki-3b6fe0" alt="Ask DeepWiki"></a>
+</p>
+
+<p align="center">
+  <a href="https://lmstudio.ai/install-mcp?name=mcpsurfr&config=eyJjb21tYW5kIjoidXZ4IiwiYXJncyI6WyJtY3BzdXJmciJdfQ%3D%3D"><img src="https://files.lmstudio.ai/deeplink/mcp-install-light.svg" alt="Add to LM Studio" height="32"></a>
+  <a href="https://cursor.com/en/install-mcp?name=mcpsurfr&config=eyJjb21tYW5kIjoidXZ4IiwiYXJncyI6WyJtY3BzdXJmciJdfQ%3D%3D"><img src="https://cursor.com/deeplink/mcp-install-dark.svg" alt="Add to Cursor" height="32"></a>
+  <a href="https://insiders.vscode.dev/redirect/mcp/install?name=mcpsurfr&config=%7B%22command%22%3A%22uvx%22%2C%22args%22%3A%5B%22mcpsurfr%22%5D%7D"><img src="https://img.shields.io/badge/VS_Code-Install_MCP-0098FF?style=for-the-badge&logo=visualstudiocode&logoColor=white" alt="Install in VS Code" height="32"></a>
+</p>
+
+<p align="center"><a href="https://ko-fi.com/X8X51MK4A1"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Support me on Ko-fi" height="32"></a></p>
 
 ```mermaid
 flowchart LR
