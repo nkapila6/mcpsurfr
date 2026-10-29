@@ -61,7 +61,7 @@ For one page you already have the link to: a URL the user pasted, or a result yo
 
 Long pages and PDFs: pass a `query` rather than reading the whole thing.
 
-Stack Overflow and other Stack Exchange questions, Wikipedia articles and GitHub repos or files are read through those sites' APIs, so they work even where the normal page is blocked. A Stack Exchange question comes back as the question, then the accepted answer, then the rest by votes, with each answer's score in its `heading`.
+Stack Overflow and other Stack Exchange questions, Wikipedia articles, GitHub repos or files, Hacker News threads and PyPI, npm and crates.io package pages are read through those sites' APIs, so they work even where the normal page is blocked. A Stack Exchange question comes back as the question, then the accepted answer, then the rest by votes, with each answer's score in its `heading`. A package page starts with an `Overview` passage (version, release date, links) and `Recent releases`; a link to an old version also names the latest one, so check it before calling a version current. A package or HN item that doesn't exist comes back as `not found`.
 
 ## Backends
 
