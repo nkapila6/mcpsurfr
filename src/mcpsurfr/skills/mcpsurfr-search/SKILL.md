@@ -1,6 +1,6 @@
 ---
 name: mcpsurfr-search
-description: Search the web and research topics with the mcpsurfr MCP server, which needs no API keys and ranks results locally. Use it when you need current information, documentation, news, or several sources on a topic. Start with the `search` tool, which returns only the relevant passages.
+description: Search the web and research topics with the mcpsurfr MCP server, which needs no API keys and ranks results locally. Use it when you need current information, documentation, news, or several sources on a topic, or to read a link or PDF the user gave you. Start with the `search` tool, which returns only the relevant passages.
 ---
 
 # mcpsurfr search
@@ -17,7 +17,7 @@ mcpsurfr searches the web through ddgs, ranks the results on-device, and fetches
 | The user pasted a link, or you need more from one result | `read_url` (with a `query` for just the relevant passages) |
 | The user asks for a specific engine | any of the above with `backend` (or `backends`) |
 
-## Filters (every tool)
+## Filters (`search`, `rag_search_ddgs`, `deep_research`)
 
 - `recency`: `day`, `week`, `month` or `year`. Use it for news, releases, prices, anything time-sensitive.
 - `region`: a code like `uk-en` or `de-de` for local results.
@@ -50,9 +50,21 @@ Full page text (main content only, code blocks and tables kept) for the top `top
 
 Prompt: `research(topic)` plans the terms, runs `deep_research` and asks for a cited summary.
 
+## `read_url`
+
+For one page you already have the link to: a URL the user pasted, or a result you want more of. No searching, no filters.
+
+- `url`: public http(s) only. Localhost and private network addresses are refused.
+- `query` (optional): what you want from the page. With it you get `passages` and `tier`, picked the same way as `search` (pass `keywords` too). Without it you get the page's main text in `content`, cut to the shared budget.
+- If the page can't be used, the result has `error` with the same reasons as `skipped` below.
+
+Long pages and PDFs: pass a `query` rather than reading the whole thing.
+
 ## Backends
 
-`auto` (best: falls back across engines) and `brave` (fast, usually up) are dependable. `wikipedia` is an exact-title lookup. `duckduckgo` and `yahoo` get rate-limited at times. `google`, `startpage` and `mojeek` are often blocked. Empty engines, fallbacks and unknown names show up in the result's `warnings`.
+`auto` (best: falls back across engines) and `brave` (fast, usually up) are dependable. With `recency` set, `auto` uses only the engines that honour dates. `wikipedia` is an exact-title lookup. `duckduckgo` and `yahoo` get rate-limited at times. `google`, `startpage` and `mojeek` are often blocked. Empty engines, fallbacks and unknown names show up in the result's `warnings`.
+
+If you also see `rag_search_google`, `deep_research_ddgs` or `deep_research_google`, they're the main tools with a fixed backend. Prefer the main tools with `backend`.
 
 ## PDFs
 
@@ -60,7 +72,7 @@ PDF links are read like pages, first 50 pages only. Passages from them have a `h
 
 ## Skipped pages
 
-Every tool lists pages it couldn't use in `skipped: [{url, reason}]`: `HTTP 403`, `timed out`, `not a web page` (images, archives...), `scanned PDF (no text layer)`, `no readable content` (nav only or JavaScript-rendered), or `near-duplicate of <url>` (the same text at another address). Fewer pages than asked for is normal. If the one you needed is skipped, say so rather than guessing its content.
+The search tools list pages they couldn't use in `skipped: [{url, reason}]`: `HTTP 403`, `timed out`, `couldn't connect`, `not a web page` (images, archives...), `scanned PDF (no text layer)`, `PDF too large`, `unreadable PDF`, `no readable content` (nav only or JavaScript-rendered), or `near-duplicate of <url>` (the same text at another address). Fewer pages than asked for is normal. If the one you needed is skipped, say so rather than guessing its content.
 
 ## Using results
 
