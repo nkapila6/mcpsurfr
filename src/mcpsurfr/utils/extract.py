@@ -21,6 +21,7 @@ _CHROME = re.compile(
     r"(^|[\s_-])(nav|navbar|navigation|menu|masthead|footer|sidebar|breadcrumbs?|cookie|consent"
     r"|banner|social|share|sharing|related|comments?|advert|ads|promo|newsletter|subscribe"
     r"|skip|toolbar|popup|modal|toc|spinner|loader|skeleton)([\s_-]|$)", re.I)
+_PERMALINKS = {"¶", "#", "§", "🔗"}
 # below this a <main>/<article> is probably a teaser, not the page's content
 _MIN_CONTENT = 500
 
@@ -134,14 +135,20 @@ def _main_root(page: str):
             el.drop_tree()
 
     containers = doc.xpath('//main|//article|//*[@role="main"]')
+    # nothing inside a heading is chrome: Sphinx wraps every section title in
+    # <a class="toc-backref">, which the "toc" pattern would otherwise delete
+    in_heading = set(doc.xpath("//h1//*|//h2//*|//h3//*|//h4//*|//h5//*|//h6//*"))
     for el in doc.xpath("//*[@class or @id]"):
-        if el.tag in ("html", "body") or el in containers:
+        if el.tag in ("html", "body") or el in containers or el in in_heading:
             continue
         if _CHROME.search(f"{el.get('class', '')} {el.get('id', '')}") and el.getparent() is not None:
             el.drop_tree()
 
     for a in doc.xpath('//a[starts-with(@href, "#")]'):
-        if _text(a).lower().startswith("skip") and a.getparent() is not None:
+        text = _text(a)
+        # "skip to content" links, and the permalink marks Sphinx and MkDocs put
+        # inside every heading, which otherwise end up as the passage's heading
+        if (text.lower().startswith("skip") or text in _PERMALINKS) and a.getparent() is not None:
             a.drop_tree()
     _drop_link_lists(doc, containers)
 
