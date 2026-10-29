@@ -250,6 +250,9 @@ def _add_meta(items: List[Dict], results: List[Dict], meta: Dict[str, Dict] | No
             item["title"] = title
         if date:
             item["date"] = date
+        for key in ("archived", "archive_url"):
+            if page.get(key):
+                item[key] = page[key]
 
 async def _rag_search(ctx: Context, query: str, backend: str, num_results: int, top_k: int, include_urls: bool,
                       opts: Dict | None = None) -> Dict:
