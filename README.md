@@ -23,7 +23,7 @@ What's in it:
 
 - **No API keys.** Searches go through [ddgs](https://github.com/deedy5/ddgs). Its `auto` mode asks several engines at once and skips blocked ones.
 - **Ranked locally.** A small MobileBERT model on plain numpy re-ranks results, so only the best pages get fetched.
-- **Clean text.** Pages are fetched with browser impersonation, and only the main content is kept: no menus, cookie banners or footers. Code blocks and tables keep their lines. The same page under two URLs comes back once.
+- **Clean text.** Pages are fetched with browser impersonation, and only the main content is kept: no menus, cookie banners or footers. Code blocks and tables keep their lines. PDFs are read too (text layer, first 50 pages). The same page under two URLs comes back once.
 - **Passages instead of pages.** `search` returns just the paragraphs that answer the question, about a tenth of the tokens. When nothing matches well, it can ask you whether you want the full pages instead.
 - **Says what it left out.** Results list skipped pages with a reason (blocked, PDF, duplicate...), cut pages are marked `truncated`, and fallbacks and engine failures show up as `warnings`. Google blocks often, so it falls back to `auto` on its own.
 - **Brings its own guide.** It serves a skill and a `research` prompt, so clients pick up how to use it without setup.

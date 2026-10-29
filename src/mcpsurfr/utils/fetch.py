@@ -17,6 +17,7 @@ import primp
 from importlib.resources import as_file
 
 from .extract import extract_blocks, extract_main_text
+from .pdf import pdf_blocks
 
 # stdout is the MCP protocol channel in stdio mode, so never print(); log to stderr
 log = logging.getLogger(__name__)
@@ -59,7 +60,7 @@ def _get(url: str, timeout: int) -> Tuple[Optional["primp.Response"], Optional[s
         response = _client().get(url, timeout=timeout)
         response.raise_for_status()
         content_type = response.headers.get("content-type", "text/html").lower()
-        if not content_type.startswith(_TEXT_TYPES):
+        if not content_type.startswith(_TEXT_TYPES) and not _is_pdf(response):
             log.info("Skipping %s: %s", url, content_type)
             return None, f"not a web page ({content_type.split(';')[0]})"
         log.debug("Fetched %s in %.2fs", url, time.time() - start_time)
@@ -76,6 +77,14 @@ def _get(url: str, timeout: int) -> Tuple[Optional["primp.Response"], Optional[s
     except primp.PrimpError as e:
         log.warning("Error fetching %s: %s - %s", url, type(e).__name__, e)
         return None, type(e).__name__
+
+def _is_pdf(response) -> bool:
+    content_type = response.headers.get("content-type", "").lower()
+    if content_type.startswith("application/pdf"):
+        return True
+    # some servers send PDFs as a generic download, so check the magic bytes
+    return content_type.startswith(("application/octet-stream", "binary/octet-stream")) \
+        and response.content[:5] == b"%PDF-"
 
 def _is_html(response) -> bool:
     return not response.headers.get("content-type", "text/html").lower().startswith("text/plain")
@@ -96,6 +105,11 @@ def fetch_page(url: str, timeout: int = 5) -> Dict:
     response, reason = _get(url, timeout)
     if response is None:
         return {"url": url, "reason": reason}
+    if _is_pdf(response):
+        blocks, reason = pdf_blocks(response.content)
+        if not blocks:
+            return {"url": url, "reason": reason}
+        return {"url": url, "text": "\n".join(f"[{page}] {text}" for page, text in blocks)}
     # primp decodes the charset (header or <meta>); extraction drops nav menus,
     # banners and footers. primp's own html->text is the fallback.
     text = (extract_main_text(response.text) if _is_html(response) else None) or _plain(response)
@@ -108,6 +122,8 @@ def fetch_blocks(url: str, timeout: int = 5) -> Tuple[List[Tuple[str, str]], Opt
     response, reason = _get(url, timeout)
     if response is None:
         return [], reason
+    if _is_pdf(response):
+        return pdf_blocks(response.content)
     blocks = extract_blocks(response.text) if _is_html(response) else []
     if not blocks:
         text = _plain(response)

@@ -54,9 +54,13 @@ Prompt: `research(topic)` plans the terms, runs `deep_research` and asks for a c
 
 `auto` (best: falls back across engines) and `brave` (fast, usually up) are dependable. `wikipedia` is an exact-title lookup. `duckduckgo` and `yahoo` get rate-limited at times. `google`, `startpage` and `mojeek` are often blocked. Empty engines, fallbacks and unknown names show up in the result's `warnings`.
 
+## PDFs
+
+PDF links are read like pages, first 50 pages only. Passages from them have a `heading` like `Page 4`, so cite the page along with the URL.
+
 ## Skipped pages
 
-Every tool lists pages it couldn't use in `skipped: [{url, reason}]`: `HTTP 403`, `timed out`, `not a web page`, `no readable content` (nav only or JavaScript-rendered), or `near-duplicate of <url>` (the same text at another address). Fewer pages than asked for is normal. If the one you needed is skipped, say so rather than guessing its content.
+Every tool lists pages it couldn't use in `skipped: [{url, reason}]`: `HTTP 403`, `timed out`, `not a web page` (images, archives...), `scanned PDF (no text layer)`, `no readable content` (nav only or JavaScript-rendered), or `near-duplicate of <url>` (the same text at another address). Fewer pages than asked for is normal. If the one you needed is skipped, say so rather than guessing its content.
 
 ## Using results
 
