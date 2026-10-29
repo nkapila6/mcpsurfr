@@ -101,62 +101,46 @@ Or with Docker (amd64 and arm64):
 
 ### Options
 
-All settings are optional and go in the server entry's `env`.
+All settings are optional and go in the server entry's `env`. This config sets each one to its default, so change only what you need:
+
+```json
+{
+  "mcpServers": {
+    "mcpsurfr": {
+      "command": "uvx",
+      "args": ["mcpsurfr"],
+      "env": {
+        "MCPSURFR_MAX_CHARS": "40000",
+        "MCPSURFR_DEEP_RESEARCH_MODE": "pages",
+        "MCPSURFR_CACHE_TTL": "300",
+        "MCPSURFR_LEGACY_TOOLS": "0"
+      }
+    }
+  }
+}
+```
 
 | Variable | Default | What it does |
 |---|---|---|
 | `MCPSURFR_MAX_CHARS` | `40000` | Text budget per call when returning full pages (`rag_search_ddgs`, `deep_research`, `read_url` without a query), shared across pages. ~4 chars per token |
 | `MCPSURFR_DEEP_RESEARCH_MODE` | `pages` | What `deep_research` returns when a call doesn't say: `pages` (full text) or `passages` (only what answers each term, about a tenth of the tokens) |
 | `MCPSURFR_CACHE_TTL` | `300` | Seconds searches and fetched pages are reused. `0` turns the cache off. News searches are never cached |
-| `MCPSURFR_LEGACY_TOOLS` | off | `1` brings back `rag_search_google`, `deep_research_ddgs` and `deep_research_google` |
+| `MCPSURFR_LEGACY_TOOLS` | `0` | `1` brings back `rag_search_google`, `deep_research_ddgs` and `deep_research_google`, for prompts or workflows that still call them by name |
 
-A normal setup, with `deep_research` set to passages and a bigger budget for full pages:
-
-```json
-{
-  "mcpServers": {
-    "mcpsurfr": {
-      "command": "uvx",
-      "args": ["mcpsurfr"],
-      "env": {
-        "MCPSURFR_DEEP_RESEARCH_MODE": "passages",
-        "MCPSURFR_MAX_CHARS": "80000"
-      }
-    }
-  }
-}
-```
-
-With the legacy tools, for prompts or workflows that still call them by name:
-
-```json
-{
-  "mcpServers": {
-    "mcpsurfr": {
-      "command": "uvx",
-      "args": ["mcpsurfr"],
-      "env": {
-        "MCPSURFR_MAX_CHARS": "80000",
-        "MCPSURFR_LEGACY_TOOLS": "1"
-      }
-    }
-  }
-}
-```
-
-Why they're off: they're just `rag_search_ddgs` and `deep_research` with a fixed `backend`, which the search tools now take themselves. Each tool's name, description and parameters get sent to the model in every chat whether it's used or not, so three duplicates cost context for nothing and give the model more ways to pick the wrong one.
+Why the legacy tools are off: they're just `rag_search_ddgs` and `deep_research` with a fixed `backend`, which the search tools now take themselves. Each tool's name, description and parameters get sent to the model in every chat whether it's used or not, so three duplicates cost context for nothing and give the model more ways to pick the wrong one.
 
 With Docker, `env` only reaches the `docker` command, not the container. Pass the settings with `-e` in `args` instead, before the image name:
 
 ```json
-"args": ["run", "--rm", "-i", "--init", "-e", "MCPSURFR_MAX_CHARS=80000", "ghcr.io/nkapila6/mcpsurfr:latest"]
+"args": ["run", "--rm", "-i", "--init",
+         "-e", "MCPSURFR_MAX_CHARS=40000", "-e", "MCPSURFR_DEEP_RESEARCH_MODE=pages",
+         "-e", "MCPSURFR_CACHE_TTL=300", "-e", "MCPSURFR_LEGACY_TOOLS=0",
+         "ghcr.io/nkapila6/mcpsurfr:latest"]
 ```
-
-Add `"-e", "MCPSURFR_LEGACY_TOOLS=1"` the same way for the legacy tools.
 
 Not sure where your config lives? See the [MCP quickstart](https://modelcontextprotocol.io/quickstart/user). Tested with Claude Desktop, Claude Code, Cursor and Goose.
 
-**Coming from `mcp-local-rag`?** Your old config keeps working, since the old URL redirects and the `mcp-local-rag` command still exists. Switching to the config above gets you the new name and drops the `--python=3.10` pin (3.10 is end of life as of October 2026). If your prompts call `rag_search_google` or `deep_research_google` by name, use the legacy config under [Options](#options).
+**Coming from `mcp-local-rag`?** Your old config keeps working, since the old URL redirects and the `mcp-local-rag` command still exists. Switching to the config above gets you the new name and drops the `--python=3.10` pin (3.10 is end of life as of October 2026). If your prompts call `rag_search_google` or `deep_research_google` by name, set `MCPSURFR_LEGACY_TOOLS` to `1` (see [Options](#options)).
 
 ## Skill and prompt
 
