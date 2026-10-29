@@ -15,6 +15,8 @@ BACKENDS = ("auto", "brave", "duckduckgo", "google", "grokipedia", "mojeek", "st
 # wikipedia, grokipedia and mojeek ignore date limits, so "auto" with a recency filter
 # sticks to the engines that honour it instead of mixing in undated results
 DATED_AUTO = "brave,duckduckgo,google,startpage,yahoo"
+# ddgs news engines. They all honour date limits.
+NEWS_BACKENDS = ("auto", "bing", "duckduckgo", "yahoo")
 
 Recency = Literal["day", "week", "month", "year"]
 _RECENCY = {"day": "d", "week": "w", "month": "m", "year": "y"}
@@ -27,8 +29,8 @@ Local web search with on-device re-ranking, no API keys.
   tokens of full pages). Pass `keywords` with terms and synonyms a good answer would contain.
 - rag_search_ddgs: full pages as text, for when the user wants whole pages. Takes a `backend`.
 - deep_research: broader topics. Give it 2-5 specific, related search_terms. Default backend is "auto".
-- Every search tool takes recency ("day", "week", "month", "year"), region ("uk-en"), and
-  include_domains / exclude_domains.
+- Every search tool takes recency ("day", "week", "month", "year"), region ("uk-en"),
+  include_domains / exclude_domains, and news=true for news articles with dates.
 - Google often blocks scrapers. When it returns nothing, the server retries with "auto" and says so.
 - Results list pages that couldn't be used in `skipped`, and engine problems in `warnings`.
 - Cite the source URLs.
@@ -90,6 +92,8 @@ def add_score_to_dict(query: str, results: List[Dict]) -> List[Dict]:
 # warnings go to the client log and into the result: most clients never show the
 # log, and the model should know when an engine was blocked or a fallback ran
 async def _warn(ctx: Context, notes: List[str], message: str) -> None:
+    if message in notes:
+        return
     notes.append(message)
     await ctx.warning(message)
 
@@ -101,10 +105,11 @@ def _extras(result: Dict, notes: List[str], skipped: List[Dict]) -> Dict:
     return result
 
 def _filters(recency: str | None = None, region: str | None = None, include_domains: List[str] | None = None,
-             exclude_domains: List[str] | None = None) -> Dict:
+             exclude_domains: List[str] | None = None, news: bool = False) -> Dict:
     """The search filters every tool takes, cleaned up. "problems" holds the ones that were dropped."""
     from mcpsurfr.utils.tools import clean_domains
-    opts = {"include": clean_domains(include_domains), "exclude": clean_domains(exclude_domains), "problems": []}
+    opts = {"include": clean_domains(include_domains), "exclude": clean_domains(exclude_domains), "problems": [],
+            "news": news}
     if recency:
         opts["timelimit"] = _RECENCY[recency]
     region = (region or "").strip().lower()
@@ -121,6 +126,17 @@ async def _start(ctx: Context, opts: Dict) -> List[str]:
         await _warn(ctx, notes, message)
     return notes
 
+def _backends(opts: Dict) -> tuple:
+    return NEWS_BACKENDS if opts.get("news") else BACKENDS
+
+async def _check_backend(ctx: Context, notes: List[str], backend: str, opts: Dict) -> str:
+    valid = _backends(opts)
+    if backend in valid:
+        return backend
+    kind = "news " if opts.get("news") else ""
+    await _warn(ctx, notes, f"Unknown {kind}backend {backend!r}, used auto. Available: {', '.join(valid)}")
+    return "auto"
+
 async def _search(ctx: Context, notes: List[str], query: str, backend: str, max_results: int,
                   opts: Dict | None = None) -> List[Dict]:
     from ddgs import DDGS
@@ -128,17 +144,21 @@ async def _search(ctx: Context, notes: List[str], query: str, backend: str, max_
     opts = opts or {}
     include, exclude = opts.get("include", []), opts.get("exclude", [])
     kwargs = {k: opts[k] for k in ("timelimit", "region") if k in opts}
-    engines = DATED_AUTO if backend == "auto" and "timelimit" in opts else backend
+    news = opts.get("news", False)
+    engines = DATED_AUTO if backend == "auto" and "timelimit" in opts and not news else backend
     # off-domain results get dropped below, so ask for more up front
     wanted = max_results * 3 if include or exclude else max_results
     try:
-        results = await asyncio.to_thread(DDGS().text, site_query(query, include), max_results=wanted,
-                                          backend=engines, **kwargs)
+        find = DDGS().news if news else DDGS().text
+        results = await asyncio.to_thread(find, site_query(query, include), max_results=wanted, backend=engines, **kwargs)
     except Exception as e:
         # ddgs raises when an engine returns nothing, which is usually a block
         log.warning("Error searching %s for %r: %s", backend, query, e)
         await _warn(ctx, notes, f"{backend} returned no results for {query!r} ({e})")
         return []
+    for r in results:
+        # news results call the link "url"
+        r.setdefault("href", r.get("url"))
     kept = [r for r in results if domain_ok(r.get("href") or "", include, exclude)]
     if results and not kept:
         await _warn(ctx, notes, f"{backend} found results for {query!r}, but none on the allowed domains")
@@ -151,10 +171,18 @@ async def _fetch(ctx: Context, results: List[Dict], include_urls: bool):
     content, skipped = await asyncio.to_thread(fetch_all_content, urls, MAX_CHARS)
     if skipped:
         await ctx.info(f"{len(skipped)} of {len(urls)} pages skipped (blocked, not a web page, empty or duplicate)")
+    _add_dates(content, results)
     if not include_urls:
         for page in content:
             page.pop("url")
     return content, skipped
+
+def _add_dates(items: List[Dict], results: List[Dict]) -> None:
+    """Carry the published date news results come with onto the pages or passages from them."""
+    dates = {r["href"]: r["date"] for r in results if r.get("href") and r.get("date")}
+    for item in items:
+        if item.get("url") in dates:
+            item["date"] = dates[item["url"]]
 
 async def _rag_search(ctx: Context, query: str, backend: str, num_results: int, top_k: int, include_urls: bool,
                       opts: Dict | None = None) -> Dict:
@@ -162,9 +190,7 @@ async def _rag_search(ctx: Context, query: str, backend: str, num_results: int, 
 
     opts = opts or _filters()
     notes = await _start(ctx, opts)
-    if backend not in BACKENDS:
-        await _warn(ctx, notes, f"Unknown backend {backend!r}, used auto. Available: {', '.join(BACKENDS)}")
-        backend = "auto"
+    backend = await _check_backend(ctx, notes, backend, opts)
     result = {"backend": backend}
     await ctx.report_progress(0, 3, f"Searching {backend} for {query!r}")
     results = await _search(ctx, notes, query, backend, num_results, opts)
@@ -187,7 +213,8 @@ async def _rag_search(ctx: Context, query: str, backend: str, num_results: int, 
 @mcp.tool(title="Web search", annotations=_READ_ONLY, icons=[_ICON])
 async def rag_search_ddgs(ctx: Context, query: str, num_results:int=10, top_k:int=5, include_urls:bool=True,
                           backend: str = "auto", recency: Recency | None = None, region: str | None = None,
-                          include_domains: List[str] | None = None, exclude_domains: List[str] | None = None) -> Dict:
+                          include_domains: List[str] | None = None, exclude_domains: List[str] | None = None,
+                          news: bool = False) -> Dict:
     """
     Search the web and return the most relevant pages as text, for when whole pages are
     wanted (search returns only the relevant passages). Results are re-ranked locally by
@@ -211,6 +238,8 @@ async def rag_search_ddgs(ctx: Context, query: str, num_results:int=10, top_k:in
         include_domains (List[str] | None): Only results from these sites, subdomains included.
             Example: ["python.org", "stackoverflow.com"]
         exclude_domains (List[str] | None): Never results from these sites. Example: ["pinterest.com"]
+        news (bool): Search news articles instead of the web. Results then carry their published
+            "date". News backends: auto, bing, duckduckgo, yahoo. Pair with recency for current events.
 
     Returns:
         Dict: {"backend", "content": [{"type": "text", "text", "url"}, ...]} ordered by relevance,
@@ -219,7 +248,7 @@ async def rag_search_ddgs(ctx: Context, query: str, num_results:int=10, top_k:in
               have "truncated": true and their full "chars". Also "skipped": [{"url", "reason"}]
               for pages left out, and "warnings" when an engine failed.
     """
-    opts = _filters(recency, region, include_domains, exclude_domains)
+    opts = _filters(recency, region, include_domains, exclude_domains, news)
     return await _rag_search(ctx, query, backend, num_results, top_k, include_urls, opts)
 
 @_legacy_tool(title="Google search", annotations=_READ_ONLY, icons=[_ICON])
@@ -276,6 +305,7 @@ async def search(
     region: str | None = None,
     include_domains: List[str] | None = None,
     exclude_domains: List[str] | None = None,
+    news: bool = False,
 ) -> Dict | InputRequiredResult:
     """
     Search the web and return only the passages that answer the query, not whole
@@ -304,6 +334,8 @@ async def search(
         include_domains (List[str] | None): Only results from these sites, subdomains included.
             Example: ["python.org", "stackoverflow.com"]
         exclude_domains (List[str] | None): Never results from these sites. Example: ["pinterest.com"]
+        news (bool): Search news articles instead of the web. Results then carry their published
+            "date". News backends: auto, bing, duckduckgo, yahoo. Pair with recency for current events.
 
     Returns:
         Dict with "passages": [{"url", "heading", "text", "matched"}, ...] best first, and
@@ -315,9 +347,9 @@ async def search(
     """
     keywords = keywords or []
     key = (query, tuple(keywords), num_results, top_pages, max_passages, backend,
-           recency, region, tuple(include_domains or []), tuple(exclude_domains or []))
+           recency, region, tuple(include_domains or []), tuple(exclude_domains or []), news)
     found = _recent.get(key) or await _find_passages(ctx, query, keywords, num_results, top_pages, max_passages,
-                                                     backend, _filters(recency, region, include_domains, exclude_domains))
+                                                     backend, _filters(recency, region, include_domains, exclude_domains, news))
     _recent[key] = found
     _recent.move_to_end(key)
     while len(_recent) > 8:
@@ -371,9 +403,7 @@ async def _find_passages(ctx: Context, query: str, keywords: List[str], num_resu
     notes = await _start(ctx, opts)
     empty = {"query": query, "passages": [], "tier": None, "pages_fetched": 0, "passages_considered": 0,
              "pages": {}, "skipped": [], "warnings": notes, "keywords_missing": False}
-    if backend not in BACKENDS:
-        await _warn(ctx, notes, f"Unknown backend {backend!r}, used auto. Available: {', '.join(BACKENDS)}")
-        backend = "auto"
+    backend = await _check_backend(ctx, notes, backend, opts)
     await ctx.report_progress(0, 4, f"Searching {backend} for {query!r}")
     results = await _search(ctx, notes, query, backend, num_results, opts)
     if not results and backend != "auto":
@@ -409,6 +439,7 @@ async def _find_passages(ctx: Context, query: str, keywords: List[str], num_resu
     scores = keyword_scores(query, keywords, passages)
     embedder = await asyncio.to_thread(_embedder)
     chosen, tier = await asyncio.to_thread(select, query, keywords, passages, scores, max_passages, embedder.embed_batch)
+    _add_dates(chosen, results)
     await ctx.report_progress(4, 4, "Done")
     return {"query": query, "passages": chosen, "tier": tier, "pages_fetched": len(pages),
             "passages_considered": len(passages), "pages": {u: pages[u] for u in urls if u in pages},
@@ -445,10 +476,11 @@ async def _deep_research_internal(ctx: Context, search_terms:List[str], backends
     opts = opts or _filters()
     notes, fallback = await _start(ctx, opts), None
     # ddgs would silently swap an unknown name for "auto", so say so instead
-    unknown = [b for b in backends if b not in BACKENDS]
+    valid = _backends(opts)
+    unknown = [b for b in backends if b not in valid]
     if unknown:
-        await _warn(ctx, notes, f"Unknown backends {unknown} skipped. Available: {', '.join(BACKENDS)}")
-    backends = [b for b in backends if b in BACKENDS] or ["auto"]
+        await _warn(ctx, notes, f"Unknown backends {unknown} skipped. Available: {', '.join(valid)}")
+    backends = [b for b in backends if b in valid] or ["auto"]
 
     all_results = []
     search_summary = {term: {backend: 0 for backend in backends} for term in search_terms}
@@ -519,6 +551,7 @@ async def deep_research(
     region: str | None = None,
     include_domains: List[str] | None = None,
     exclude_domains: List[str] | None = None,
+    news: bool = False,
 ) -> Dict:
     """
     Research a topic across several search terms and engines. Each term is searched on
@@ -544,6 +577,8 @@ async def deep_research(
         include_domains (List[str] | None): Only results from these sites, subdomains included.
             Example: ["python.org", "stackoverflow.com"]
         exclude_domains (List[str] | None): Never results from these sites. Example: ["pinterest.com"]
+        news (bool): Search news articles instead of the web. Results then carry their published
+            "date". News backends: auto, bing, duckduckgo, yahoo. Pair with recency for current events.
 
     Returns:
         Dict with search_terms, backends ("fallback": "auto" if they all came back empty),
@@ -564,7 +599,7 @@ async def deep_research(
         num_results_per_term=num_results_per_term,
         top_k_per_term=top_k_per_term,
         include_urls=include_urls,
-        opts=_filters(recency, region, include_domains, exclude_domains),
+        opts=_filters(recency, region, include_domains, exclude_domains, news),
     )
 
 

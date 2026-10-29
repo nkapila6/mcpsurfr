@@ -21,6 +21,7 @@ mcpsurfr searches the web through ddgs, ranks the results on-device, and fetches
 - `recency`: `day`, `week`, `month` or `year`. Use it for news, releases, prices, anything time-sensitive.
 - `region`: a code like `uk-en` or `de-de` for local results.
 - `include_domains` / `exclude_domains`: e.g. `["python.org"]` to stick to official docs, `["pinterest.com"]` to drop noise. Subdomains count.
+- `news: true`: news articles instead of web pages, each with its published `date`. News backends are `auto`, `bing`, `duckduckgo`, `yahoo`. Combine with `recency` for current events. Some news sites (msn.com) render with JavaScript and end up in `skipped`.
 
 ## `search` (start here)
 
