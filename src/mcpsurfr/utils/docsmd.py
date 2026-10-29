@@ -29,7 +29,8 @@ _MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 _MD_IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 _FENCE_INFO = re.compile(r"^(\s*```[\w+-]*)[ \t].*$", re.M)
 
-# host -> whether its pages have .md copies. Lives as long as the server.
+# host -> whether its pages have .md copies. Kept in memory for the server process,
+# which is usually one client session; a new session relearns it for one extra request.
 _hosts: Dict[str, bool] = {}
 _lock = threading.Lock()
 
