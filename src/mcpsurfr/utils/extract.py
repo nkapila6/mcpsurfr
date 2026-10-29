@@ -95,6 +95,15 @@ def extract_main_text(page: str) -> Optional[str]:
     return None if root is None else (_render(root) or None)
 
 
+def fragment_text(fragment: str) -> str:
+    """Text of an HTML snippet, like a post body from an API, laid out the same way
+    as a page: code blocks keep their lines."""
+    try:
+        return _render(lxml_html.fragment_fromstring(fragment, create_parent="div"))
+    except (ParserError, ValueError):
+        return ""
+
+
 # a table row is one block, so its cells stay together
 _BLOCKS = {"p", "li", "pre", "blockquote", "tr", "dd", "dt", "figcaption", "h1", "h2", "h3", "h4", "h5", "h6"}
 _HEADINGS = {"h1", "h2", "h3", "h4", "h5", "h6"}

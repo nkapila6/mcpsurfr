@@ -16,6 +16,7 @@ import primp
 
 from importlib.resources import as_file
 
+from .adapters import site_doc
 from .cache import TTLCache
 from .extract import extract_blocks, extract_main_text
 from .pdf import pdf_blocks
@@ -117,6 +118,9 @@ def fetch_doc(url: str, timeout: int = 5) -> Dict:
     return doc
 
 def _fetch_doc(url: str, timeout: int) -> Dict:
+    doc = site_doc(url, _client(), timeout)
+    if doc:
+        return doc
     response, reason = _get(url, timeout)
     if response is None:
         return {"url": url, "reason": reason}
