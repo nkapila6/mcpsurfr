@@ -4,7 +4,7 @@
 
 Local web search for your LLM over MCP. No API keys, and results are ranked on your machine. _Formerly [`mcp-local-rag`](https://github.com/nkapila6/mcpsurfr/tree/main-bak)._
 
-[![Add MCP Server mcpsurfr to LM Studio](https://files.lmstudio.ai/deeplink/mcp-install-light.svg)](https://lmstudio.ai/install-mcp?name=mcpsurfr&config=eyJjb21tYW5kIjoidXZ4IiwiYXJncyI6WyItLWZyb20iLCJnaXQraHR0cHM6Ly9naXRodWIuY29tL25rYXBpbGE2L21jcHN1cmZyIiwibWNwc3VyZnIiXX0%3D) [![Ask DeepWiki](https://img.shields.io/badge/Ask-DeepWiki-3b6fe0)](https://deepwiki.com/nkapila6/mcpsurfr) [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/X8X51MK4A1)
+[![Add MCP Server mcpsurfr to LM Studio](https://files.lmstudio.ai/deeplink/mcp-install-light.svg)](https://lmstudio.ai/install-mcp?name=mcpsurfr&config=eyJjb21tYW5kIjoidXZ4IiwiYXJncyI6WyJtY3BzdXJmciJdfQ%3D%3D) [![Ask DeepWiki](https://img.shields.io/badge/Ask-DeepWiki-3b6fe0)](https://deepwiki.com/nkapila6/mcpsurfr) [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/X8X51MK4A1)
 
 ```mermaid
 flowchart LR
@@ -49,18 +49,20 @@ What it doesn't do: JavaScript-only pages, OCR for scanned PDFs, image search.
 
 ## Install
 
-With [uv](https://docs.astral.sh/uv/):
+From PyPI with [uv](https://docs.astral.sh/uv/):
 
 ```json
 {
   "mcpServers": {
     "mcpsurfr": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/nkapila6/mcpsurfr", "mcpsurfr"]
+      "args": ["mcpsurfr"]
     }
   }
 }
 ```
+
+`uvx` keeps using the version it cached first. Use `"mcpsurfr@latest"` to pick up new releases on every start (about a second slower), or `"mcpsurfr@<version>"` to pin one. `uv tool install mcpsurfr` works too, with `"command": "mcpsurfr"`.
 
 Or with Docker (amd64 and arm64):
 
@@ -91,7 +93,7 @@ A normal setup only ever needs the budget, if anything:
   "mcpServers": {
     "mcpsurfr": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/nkapila6/mcpsurfr", "mcpsurfr"],
+      "args": ["mcpsurfr"],
       "env": {
         "MCPSURFR_MAX_CHARS": "80000"
       }
@@ -107,7 +109,7 @@ With the legacy tools, for prompts or workflows that still call them by name:
   "mcpServers": {
     "mcpsurfr": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/nkapila6/mcpsurfr", "mcpsurfr"],
+      "args": ["mcpsurfr"],
       "env": {
         "MCPSURFR_MAX_CHARS": "80000",
         "MCPSURFR_LEGACY_TOOLS": "1"
