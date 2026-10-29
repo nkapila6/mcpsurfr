@@ -15,6 +15,7 @@ from functools import lru_cache
 import primp
 
 from importlib.resources import as_file
+from urllib.parse import quote
 
 from .adapters import site_doc
 from . import docsmd
@@ -107,16 +108,56 @@ def _readable(text: str) -> bool:
 # call is free for the next for a few minutes
 _docs = TTLCache(maxsize=64)
 _UNREADABLE = "no readable content (nav only or rendered by JavaScript)"
+# what a page carries besides its text, passed on to pages and passages in results
+META_KEYS = ("title", "date", "archived", "archive_url")
+# pages that are gone, not refused: only these go to the Wayback Machine. A 403 or 429
+# is a site saying no, and the archive isn't a way around that.
+_GONE = ("HTTP 404", "HTTP 410", "couldn't connect", "timed out")
 
 def fetch_doc(url: str, timeout: int = 5) -> Dict:
     """A page as {"url", "blocks", "text"}, or {"url", "reason"} when it's unusable.
-    "blocks" are (heading, text) pairs for passage search, "text" the main content."""
+    "blocks" are (heading, text) pairs for passage search, "text" the main content.
+    A page that's gone comes from the Wayback Machine instead, marked "archived"."""
     doc = _docs.get(url)
     if doc is None:
         doc = _fetch_doc(url, timeout)
+        if doc.get("reason") in _GONE:
+            doc = _from_archive(url, timeout) or doc
         if "text" in doc:
             _docs.set(url, doc)
     return doc
+
+# the archive rate-limits hard (a 429 after a handful of lookups); once it does, leave
+# it alone for a while instead of adding a doomed request to every dead page
+_ARCHIVE_BACKOFF = 600
+_archive_blocked_until = 0.0
+
+def _from_archive(url: str, timeout: int) -> Optional[Dict]:
+    """The closest Wayback Machine snapshot of a page that's gone, read like any page.
+    Gives up quietly when the archive has none or is rate-limiting."""
+    global _archive_blocked_until
+    if time.monotonic() < _archive_blocked_until:
+        return None
+    timeout = max(timeout, 10)  # the archive is slower than most sites
+    try:
+        r = _client().get(f"https://archive.org/wayback/available?url={quote(url, safe='')}", timeout=timeout)
+        if r.status_code == 429:
+            _archive_blocked_until = time.monotonic() + _ARCHIVE_BACKOFF
+            log.info("Wayback Machine is rate-limiting; not asking it for %ss", _ARCHIVE_BACKOFF)
+            return None
+        r.raise_for_status()
+        snap = r.json().get("archived_snapshots", {}).get("closest") or {}
+    except Exception as e:
+        log.info("No archive lookup for %s: %s", url, e)
+        return None
+    if not snap.get("available") or str(snap.get("status")) != "200" or not snap.get("timestamp"):
+        return None
+    ts = snap["timestamp"]
+    # id_ asks for the page as captured, without the archive's toolbar and rewritten links
+    doc = _fetch_doc(f"https://web.archive.org/web/{ts}id_/{url}", timeout)
+    if "text" not in doc:
+        return None
+    return doc | {"url": url, "archived": f"{ts[:4]}-{ts[4:6]}-{ts[6:8]}", "archive_url": snap.get("url", "")}
 
 def _fetch_doc(url: str, timeout: int) -> Dict:
     doc = site_doc(url, _client(), timeout)
@@ -191,7 +232,7 @@ def fetch_all_blocks(urls: List[str]) -> Tuple[Dict[str, List[Tuple[str, str]]],
     for url, doc in zip(urls, _parallel(fetch_doc, urls, lambda u, r: {"url": u, "reason": r})):
         if doc.get("blocks"):
             pages[url] = doc["blocks"]
-            meta[url] = {k: doc[k] for k in ("title", "date") if doc.get(k)}
+            meta[url] = {k: doc[k] for k in META_KEYS if doc.get(k)}
         else:
             skipped.append({"url": url, "reason": doc.get("reason")})
     texts = drop_near_duplicates([{"url": u, "text": "\n".join(t for _, t in b)} for u, b in pages.items()], skipped)
@@ -241,7 +282,7 @@ def fit_budget(pages: List[Dict], budget: int) -> List[Dict]:
     for i, page in enumerate(pages):
         text = page["text"]
         entry = {"type": "text", "text": clip(text, alloc[i]), "url": page["url"]}
-        entry.update({k: page[k] for k in ("title", "date") if page.get(k)})
+        entry.update({k: page[k] for k in META_KEYS if page.get(k)})
         if len(entry["text"]) < len(text):
             entry.update(truncated=True, chars=len(text))
         out.append(entry)
