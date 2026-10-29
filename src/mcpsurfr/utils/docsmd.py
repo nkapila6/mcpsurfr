@@ -108,7 +108,8 @@ def fetch(client, md: str, url: str, timeout: int) -> Optional[Dict]:
     if not blocks:
         return None
     title = title or next((h for h, _ in blocks if h), "")
-    doc = {"url": url, "blocks": blocks, "text": "\n\n".join(f"{h}\n{t}" if h else t for h, t in blocks)}
+    doc = {"url": url, "blocks": blocks, "text": "\n\n".join(f"{h}\n{t}" if h else t for h, t in blocks),
+           "markdown": text.strip()}
     if title:
         doc["title"] = title
     return doc

@@ -20,6 +20,7 @@ from .adapters import site_doc
 from . import docsmd
 from .cache import TTLCache
 from .extract import extract_blocks, extract_main_text, page_meta, url_date
+from .markdown import blocks_to_markdown, html_to_markdown
 from .pdf import pdf_blocks
 
 # stdout is the MCP protocol channel in stdio mode, so never print(); log to stderr
@@ -134,7 +135,8 @@ def _fetch_doc(url: str, timeout: int) -> Dict:
         blocks, reason = pdf_blocks(response.content)
         if not blocks:
             return {"url": url, "reason": reason}
-        return {"url": url, "blocks": blocks, "text": "\n".join(f"[{page}] {text}" for page, text in blocks)}
+        return {"url": url, "blocks": blocks, "text": "\n".join(f"[{page}] {text}" for page, text in blocks),
+                "markdown": blocks_to_markdown(blocks)}
     html = _is_html(response)
     md = docsmd.from_html(response.text, url) if html else None
     if md:
@@ -156,7 +158,8 @@ def _fetch_doc(url: str, timeout: int) -> Dict:
         blocks = [("", line) for line in text.split("\n") if line.strip()]
     if not text_ok:
         text = "\n".join(t for _, t in blocks)
-    doc = {"url": url, "blocks": blocks, "text": text} | (page_meta(response.text) if html else {})
+    markdown = (html_to_markdown(response.text, url) if html else None) or blocks_to_markdown(blocks)
+    doc = {"url": url, "blocks": blocks, "text": text, "markdown": markdown} | (page_meta(response.text) if html else {})
     if "date" not in doc and url_date(url):
         doc["date"] = url_date(url)
     return doc
@@ -164,7 +167,7 @@ def _fetch_doc(url: str, timeout: int) -> Dict:
 def fetch_page(url: str, timeout: int = 5) -> Dict:
     """A page's main text: {"url", "text"}, or {"url", "reason"} when it's unusable."""
     doc = fetch_doc(url, timeout)
-    return {k: v for k, v in doc.items() if k != "blocks"}
+    return {k: v for k, v in doc.items() if k not in ("blocks", "markdown")}
 
 def fetch_blocks(url: str, timeout: int = 5) -> Tuple[List[Tuple[str, str]], Optional[str]]:
     """A page as (heading, text) blocks for passage search, plus why it failed if it did."""
