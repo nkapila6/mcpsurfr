@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="136" viewBox="0 0 520 136" role="img" aria-labelledby="t">
+  <title id="t">mcpsurfr</title>
+  <style>
+    .ink { fill: #e6e9f2; }
+    .dim { fill: #8b93a6; }
+    .dim-s { stroke: #8b93a6; }
+    .accent { fill: #89b4fa; }
+    .accent-s { stroke: #89b4fa; }
+    .lens { fill: #1c2233; }
+    .pink { fill: #f5c2e7; }
+    text { font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+  </style>
+  <defs>
+    <clipPath id="glass"><circle cx="58" cy="56" r="40"/></clipPath>
+  </defs>
+
+  <!-- the mark: a magnifying glass with a wave in it, and a surfer riding it -->
+  <circle class="lens" cx="58" cy="56" r="40"/>
+  <g clip-path="url(#glass)" fill="none" stroke-linecap="round">
+    <path class="dim-s" stroke-width="4" opacity="0.5" d="M8 82 C22 72 34 72 48 82 S74 92 88 82 S104 72 112 78"/>
+    <path class="accent-s" stroke-width="6" d="M8 66 C20 52 32 50 44 60 S68 76 80 62 S98 46 112 56"/>
+  </g>
+  <circle class="pink" cx="40" cy="47" r="7">
+    <animateTransform attributeName="transform" type="translate" values="0 0;0 -4;0 0" dur="1.6s" repeatCount="indefinite"/>
+  </circle>
+  <circle class="accent-s" cx="58" cy="56" r="40" fill="none" stroke-width="7"/>
+  <path class="accent-s" fill="none" stroke-width="12" stroke-linecap="round" d="M88 86 L116 114"/>
+
+  <!-- wordmark -->
+  <text x="150" y="78" font-size="58" font-weight="700" letter-spacing="-1"><tspan class="ink">mcp</tspan><tspan class="accent">surfr</tspan></text>
+  <text x="152" y="110" font-size="17" class="dim">local web search, no API keys</text>
+</svg>
